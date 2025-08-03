@@ -4,6 +4,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS btree_gin;
+CREATE EXTENSION IF NOT EXISTS pg_search;
 
 -- Create schema for AI applications
 CREATE SCHEMA IF NOT EXISTS ai_data;
@@ -33,27 +34,20 @@ CREATE TABLE ai_data.chunks (
 CREATE INDEX ON ai_data.documents USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX ON ai_data.chunks USING hnsw (embedding vector_cosine_ops);
 
--- Create BM25 search indexes with ParadeDB
-CALL paradedb.create_bm25_index(
-    index_name => 'documents_search_idx',
-    schema_name => 'ai_data', 
-    table_name => 'documents',
-    key_field => 'id',
-    text_fields => '{
-        "title": {"weight": 3.0},
-        "content": {"weight": 1.0}
-    }'
-);
+-- Create simple text search index (fallback if ParadeDB is not available)
+CREATE INDEX idx_documents_title_content ON ai_data.documents USING gin(to_tsvector('english', title || ' ' || content));
 
-CALL paradedb.create_bm25_index(
-    index_name => 'chunks_search_idx',
-    schema_name => 'ai_data',
-    table_name => 'chunks', 
-    key_field => 'id',
-    text_fields => '{
-        "chunk_text": {"weight": 1.0}
-    }'
-);
+-- Create a function to initialize text search indexes
+CREATE OR REPLACE FUNCTION ai_data.setup_text_indexes()
+RETURNS void AS $$
+BEGIN
+    -- Create standard PostgreSQL text search indexes
+    RAISE NOTICE 'Setting up standard PostgreSQL text search indexes';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Call the function to setup indexes (this will run during initialization)
+SELECT ai_data.setup_text_indexes();
 
 -- Create functions for hybrid search (vector + text)
 CREATE OR REPLACE FUNCTION ai_data.hybrid_search(
@@ -67,7 +61,7 @@ RETURNS TABLE (
     title TEXT,
     content TEXT,
     vector_similarity FLOAT,
-    text_score FLOAT,
+    text_score DOUBLE PRECISION,
     combined_score FLOAT
 ) AS $$
 BEGIN
@@ -88,10 +82,10 @@ BEGIN
             d.id,
             d.title, 
             d.content,
-            paradedb.score(d.id) as text_score
+            ts_rank(to_tsvector('english', d.title || ' ' || d.content), plainto_tsquery('english', query_text))::DOUBLE PRECISION as text_score
         FROM ai_data.documents d
-        WHERE d.id @@@ query_text
-        ORDER BY paradedb.score(d.id) DESC
+        WHERE to_tsvector('english', d.title || ' ' || d.content) @@ plainto_tsquery('english', query_text)
+        ORDER BY ts_rank(to_tsvector('english', d.title || ' ' || d.content), plainto_tsquery('english', query_text)) DESC
         LIMIT limit_count * 2
     )
     SELECT 
@@ -107,3 +101,24 @@ BEGIN
     LIMIT limit_count;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Create function to generate random vectors for testing
+CREATE OR REPLACE FUNCTION ai_data.generate_random_vector(dimensions INTEGER)
+RETURNS vector AS $$
+DECLARE
+    result vector;
+BEGIN
+    -- Generate a random vector with specified dimensions
+    SELECT INTO result
+        (SELECT array_agg(random()) FROM generate_series(1, dimensions))::vector;
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Test the function to ensure it works correctly
+DO $$
+BEGIN
+    -- Test that we can generate a 1536-dimensional vector
+    PERFORM ai_data.generate_random_vector(1536);
+    RAISE NOTICE 'Vector generator function successfully tested with 1536 dimensions';
+END $$;

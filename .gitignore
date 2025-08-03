@@ -1,0 +1,13 @@
+# Ignorte Apple files
+.DS_Store
+# Ignore Python cache files
+__pycache__/
+*.pyc
+# Ignore virtual environment directories
+venv/
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+# Ignore log files
+*.log
+# Ignore database files
+*.sqlite3

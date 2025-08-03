@@ -1,21 +1,49 @@
-# Use a Debian-based approach for better extension compatibility
-FROM postgres:17.5-bookworm
+# Build stage - contains all build tools and dependencies
+FROM postgres:17.5-bookworm AS builder
 
 # Configure APT to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install required packages including lsb-release for repository identification
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
-    lsb-release \
-    build-essential \ 
-    git \ 
-    libssl-dev \ 
-    pkg-config \ 
+    build-essential \
+    git \
+    libssl-dev \
+    pkg-config \
     libclang-dev \
     postgresql-server-dev-17 \
+    bison \
+    flex \
+    libreadline-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    /root/.cargo/bin/cargo install cargo-pgrx --version 0.15.0 --locked
+
+# Build ParadeDB pgsearch extension
+RUN git clone --branch v0.17.2 https://github.com/paradedb/paradedb.git /tmp/paradedb && \
+    cd /tmp/paradedb/pg_search && \
+    /root/.cargo/bin/cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config && \
+    /root/.cargo/bin/cargo pgrx install --release
+
+# Runtime stage - minimal PostgreSQL image with only necessary components
+FROM postgres:17.5-bookworm AS runtime
+
+# Configure APT to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-contrib \
+    postgresql-17-pgvector \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy built ParadeDB extension from builder stage
+COPY --from=builder /usr/lib/postgresql/17/lib/pg_search.so /usr/lib/postgresql/17/lib/
+COPY --from=builder /usr/share/postgresql/17/extension/pg_search* /usr/share/postgresql/17/extension/
 
 # Copy PostgreSQL configuration
 COPY postgresql.conf /etc/postgresql/postgresql.conf
@@ -23,31 +51,12 @@ COPY postgresql.conf /etc/postgresql/postgresql.conf
 # Copy initialization scripts
 COPY docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
 
-# Install standard PostgreSQL extensions
-RUN apt-get update && apt-get install -y \
-    postgresql-contrib \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install pgvector extension for PostgreSQL 17
-RUN apt-get update && apt-get install -y postgresql-17-pgvector
-
-# Install dependencies for cargo pgrx1
-RUN apt-get update && apt-get install -y \
-    bison \
-    flex \
-    libreadline-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    /root/.cargo/bin/cargo install cargo-pgrx --version 0.15.0 --locked
-
-# Install ParadeDB pgsearch extension    
-RUN git clone --branch v0.17.2 https://github.com/paradedb/paradedb.git /tmp/paradedb && \
-    cd /tmp/paradedb/pg_search && \
-    /root/.cargo/bin/cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config && \
-    /root/.cargo/bin/cargo pgrx install --release && \
-    rm -rf /tmp/paradedb
-
+# Enable all required extensions in the database
+RUN echo "CREATE EXTENSION IF NOT EXISTS pg_search;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
+    echo "CREATE EXTENSION IF NOT EXISTS vector;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
+    echo "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
+    echo "CREATE EXTENSION IF NOT EXISTS pg_trgm;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
+    echo "CREATE EXTENSION IF NOT EXISTS btree_gin;" >> /docker-entrypoint-initdb.d/00-extensions.sql
 
 # Set up user
 USER postgres
