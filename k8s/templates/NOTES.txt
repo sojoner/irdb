@@ -1,0 +1,54 @@
+AI-Enhanced PostgreSQL Cluster Deployed!
+
+Your IR DB PostgreSQL cluster "{{ .Values.cnpg.cluster.name }}" has been deployed with:
+- Instances: {{ .Values.cnpg.cluster.instances }}
+- Custom Image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
+- PostgreSQL Version: {{ .Values.image.majorVersion }}
+- Storage: {{ .Values.cnpg.cluster.storage.size }}
+
+To check the status of your cluster:
+
+  kubectl get cluster {{ .Values.cnpg.cluster.name }} -n {{ .Release.Namespace }}
+
+To get detailed cluster information:
+
+  kubectl cnpg status {{ .Values.cnpg.cluster.name }} -n {{ .Release.Namespace }}
+
+To connect to the primary instance:
+
+  # Get the superuser password
+  export PGPASSWORD=$(kubectl get secret {{ .Values.cnpg.cluster.name }}-superuser \
+    -n {{ .Release.Namespace }} -o jsonpath='{.data.password}' | base64 -d)
+
+{{- if .Values.nodePort.enabled }}
+
+  # Connect via NodePort (accessible from your LAN)
+  psql -h <NODE_IP> -U postgres -d {{ .Values.cnpg.cluster.bootstrap.initdb.database }} -p {{ .Values.nodePort.nodePort | default 30432 }}
+
+  # To find the node IP hosting the primary pod:
+  kubectl get pod -n {{ .Release.Namespace }} -l cnpg.io/cluster={{ include "irdb-postgres.clusterName" . }},role=primary -o wide
+
+{{- else }}
+
+  # Port-forward to the primary
+  kubectl port-forward -n {{ .Release.Namespace }} \
+    svc/{{ .Values.cnpg.cluster.name }}-rw 5432:5432
+
+  # Connect with psql (in another terminal)
+  psql -h localhost -U postgres -d {{ .Values.cnpg.cluster.bootstrap.initdb.database }} -p 5432
+{{- end }}
+
+Available services:
+- Primary (read-write): {{ .Values.cnpg.cluster.name }}-rw.{{ .Release.Namespace }}.svc.cluster.local
+- Replicas (read-only): {{ .Values.cnpg.cluster.name }}-ro.{{ .Release.Namespace }}.svc.cluster.local
+- Any instance (read): {{ .Values.cnpg.cluster.name }}-r.{{ .Release.Namespace }}.svc.cluster.local
+{{- if .Values.nodePort.enabled }}
+- NodePort (external): <NODE_IP>:{{ .Values.nodePort.nodePort | default 30432 }}
+{{- end }}
+
+Installed extensions (in custom image):
+- pgvector (vector similarity search)
+- pg_search (ParadeDB full-text search)
+- pg_stat_statements (query performance)
+
+For more information, visit: https://cloudnative-pg.io

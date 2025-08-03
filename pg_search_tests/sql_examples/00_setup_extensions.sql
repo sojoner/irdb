@@ -1,15 +1,33 @@
--- docker-entrypoint-initdb.d/01-ai-extensions.sql
--- Create extensions for AI/ML workloads
+-- pg_search_tests/sql_examples/00_setup_extensions.sql
+-- Setup script for initializing all required extensions and schema for IR DB
+-- Run this FIRST before running any other examples
+--
+-- Usage:
+--   psql -h <host> -U postgres -d app -f 00_setup_extensions.sql
 
--- Create app user if it doesn't exist (for Docker Compose)
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT FROM pg_user WHERE usename = 'app') THEN
-        CREATE ROLE app WITH LOGIN ENCRYPTED PASSWORD 'app_password_123';
-    END IF;
-END $$;
+\echo 'Setting up IR DB extensions and schema...'
+
+-- Create all required extensions
+CREATE EXTENSION IF NOT EXISTS vector;
+\echo '✓ vector extension created'
+
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+\echo '✓ pg_stat_statements extension created'
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+\echo '✓ pg_trgm extension created'
+
+CREATE EXTENSION IF NOT EXISTS btree_gin;
+\echo '✓ btree_gin extension created'
+
+-- pg_search needs special handling - it may not load if not in shared_preload_libraries
+-- Try to create it, but continue if it fails
+CREATE EXTENSION IF NOT EXISTS pg_search;
+\echo '✓ pg_search extension created (or already exists)'
 
 -- Create schema for AI applications
 CREATE SCHEMA IF NOT EXISTS ai_data;
+\echo '✓ ai_data schema created'
 
 -- Grant permissions on the schema to postgres user (default superuser)
 GRANT ALL ON SCHEMA ai_data TO postgres;
@@ -17,19 +35,21 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ai_data TO postgres;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA ai_data TO postgres;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ai_data GRANT ALL ON TABLES TO postgres;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ai_data GRANT ALL ON SEQUENCES TO postgres;
+\echo '✓ Permissions granted to postgres user'
 
 -- Create tables for RAG applications
-CREATE TABLE ai_data.documents (
+CREATE TABLE IF NOT EXISTS ai_data.documents (
     id SERIAL PRIMARY KEY,
     title TEXT NOT NULL,
     content TEXT NOT NULL,
     metadata JSONB,
-    embedding vector(1536), -- OpenAI ada-002 dimension
+    embedding vector(1536),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
+\echo '✓ ai_data.documents table created'
 
-CREATE TABLE ai_data.chunks (
+CREATE TABLE IF NOT EXISTS ai_data.chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER REFERENCES ai_data.documents(id),
     chunk_text TEXT NOT NULL,
@@ -38,25 +58,16 @@ CREATE TABLE ai_data.chunks (
     token_count INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
+\echo '✓ ai_data.chunks table created'
 
 -- Create indexes for vector similarity search
-CREATE INDEX ON ai_data.documents USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX ON ai_data.chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_documents_embedding ON ai_data.documents USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON ai_data.chunks USING hnsw (embedding vector_cosine_ops);
+\echo '✓ Vector similarity indexes created'
 
 -- Create simple text search index (fallback if ParadeDB is not available)
-CREATE INDEX idx_documents_title_content ON ai_data.documents USING gin(to_tsvector('english', title || ' ' || content));
-
--- Create a function to initialize text search indexes
-CREATE OR REPLACE FUNCTION ai_data.setup_text_indexes()
-RETURNS void AS $$
-BEGIN
-    -- Create standard PostgreSQL text search indexes
-    RAISE NOTICE 'Setting up standard PostgreSQL text search indexes';
-END;
-$$ LANGUAGE plpgsql;
-
--- Call the function to setup indexes (this will run during initialization)
-SELECT ai_data.setup_text_indexes();
+CREATE INDEX IF NOT EXISTS idx_documents_title_content ON ai_data.documents USING gin(to_tsvector('english', title || ' ' || content));
+\echo '✓ Text search index created'
 
 -- Create functions for hybrid search (vector + text)
 CREATE OR REPLACE FUNCTION ai_data.hybrid_search(
@@ -110,6 +121,7 @@ BEGIN
     LIMIT limit_count;
 END;
 $$ LANGUAGE plpgsql;
+\echo '✓ hybrid_search function created'
 
 -- Create function to generate random vectors for testing
 CREATE OR REPLACE FUNCTION ai_data.generate_random_vector(dimensions INTEGER)
@@ -117,24 +129,23 @@ RETURNS vector AS $$
 DECLARE
     result vector;
 BEGIN
-    -- Generate a random vector with specified dimensions
     SELECT INTO result
         (SELECT array_agg(random()) FROM generate_series(1, dimensions))::vector;
     RETURN result;
 END;
 $$ LANGUAGE plpgsql;
+\echo '✓ generate_random_vector function created'
 
--- Test the function to ensure it works correctly
-DO $$
-BEGIN
-    -- Test that we can generate a 1536-dimensional vector
-    PERFORM ai_data.generate_random_vector(1536);
-    RAISE NOTICE 'Vector generator function successfully tested with 1536 dimensions';
-END $$;
-
--- Grant permissions to app user (for application access)
+-- Grant permissions to app user
 GRANT USAGE ON SCHEMA ai_data TO app;
 GRANT SELECT ON ALL TABLES IN SCHEMA ai_data TO app;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ai_data TO app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ai_data GRANT SELECT ON TABLES TO app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA ai_data GRANT EXECUTE ON FUNCTIONS TO app;
+\echo '✓ Permissions granted to app user'
+
+\echo ''
+\echo '✓ Setup complete! All extensions, schema, tables, and functions are ready.'
+\echo ''
+\echo 'Extension status:'
+SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pg_search', 'pg_trgm', 'pg_stat_statements', 'btree_gin') ORDER BY extname;

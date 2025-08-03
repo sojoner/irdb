@@ -1,0 +1,44 @@
+# Development environment overrides
+# Deploy with: helm install irdb-postgres . -f values-dev.yaml
+
+# Enable NodePort for local network access
+nodePort:
+  enabled: true
+  nodePort: 30432  # Fixed port for development
+  port: 5432
+
+cnpg:
+  cluster:
+    instances: 1  # Single instance for development
+
+    # Reduced resources for development
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 500m
+      limits:
+        memory: 1Gi
+        cpu: 1000m
+
+    # Smaller storage
+    storage:
+      size: 5Gi
+      storageClass: local-path
+
+    # No sync replication needed for single instance
+    minSyncReplicas: 0
+    maxSyncReplicas: 0
+
+    # Disable affinity for single-node clusters
+    affinity:
+      enablePodAntiAffinity: false
+
+    # More verbose logging for development
+    postgresql:
+      parameters:
+        log_min_duration_statement: "100"  # Log queries > 100ms
+        log_statement: "all"  # Log all statements
+
+catalog:
+  enabled: true
+  name: sojoner-catalog

@@ -1,0 +1,63 @@
+[package]
+name = "pg_search_tests"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+test = true
+
+[[test]]
+name = "bm25_detailed_tests"
+path = "tests/bm25_detailed_tests.rs"
+harness = true
+
+[[test]]
+name = "advanced_search_tests"
+path = "tests/advanced_search_tests.rs"
+harness = true
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"
+harness = true
+
+[[test]]
+name = "dbtuning_test"
+path = "tests/dbtuning_test.rs"
+harness = true
+
+[[test]]
+name = "init_db_test"
+path = "tests/init_db_test.rs"
+harness = true
+
+[[bin]]
+name = "connection_test"
+path = "src/bin/connection_test.rs"
+
+[[bin]]
+name = "bm25_test"
+path = "src/bin/bm25_test.rs"
+
+[[bin]]
+name = "vector_test"
+path = "src/bin/vector_test.rs"
+
+[[bin]]
+name = "hybrid_search_test"
+path = "src/bin/hybrid_search_test.rs"
+
+[dependencies]
+postgres = "0.19"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+dotenv = "0.15"
+pgvector = "0.4"

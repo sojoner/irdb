@@ -1,0 +1,21 @@
+apiVersion: v2
+name: irdb-postgres
+description: AI-enhanced PostgreSQL 17 with pgvector and ParadeDB extensions
+type: application
+version: 0.1.1
+appVersion: "0.20.4"
+keywords:
+  - postgresql
+  - database
+  - vector
+  - ai
+  - pgvector
+  - paradedb
+  - rag
+maintainers:
+  - name: irdb
+dependencies:
+  - name: cluster
+    version: 0.4.0
+    repository: https://cloudnative-pg.github.io/charts
+    alias: cnpg

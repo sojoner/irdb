@@ -1,0 +1,12 @@
+{{- if .Values.catalog.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ClusterImageCatalog
+metadata:
+  name: {{ .Values.catalog.name }}
+  labels:
+    {{- include "irdb-postgres.labels" . | nindent 4 }}
+spec:
+  images:
+    - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
+      major: {{ .Values.image.majorVersion }}
+{{- end }}
