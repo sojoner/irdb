@@ -1,0 +1,46 @@
+# Production environment overrides
+# Deploy with: helm install irdb-postgres . -f values-prod.yaml
+
+cnpg:
+  cluster:
+    instances: 3  # High availability with 3 instances
+
+    # Production-grade resources
+    resources:
+      requests:
+        memory: "4Gi"
+        cpu: "2000m"
+      limits:
+        memory: "8Gi"
+        cpu: "4000m"
+
+    # Larger storage
+    storage:
+      size: 50Gi
+
+    # Synchronous replication for data safety
+    minSyncReplicas: 1
+    maxSyncReplicas: 1
+
+    # Enable monitoring
+    monitoring:
+      enablePodMonitor: true
+
+    # Enforce pod anti-affinity
+    affinity:
+      enablePodAntiAffinity: true
+      topologyKey: kubernetes.io/hostname
+
+    # Production PostgreSQL settings
+    postgresql:
+      parameters:
+        shared_buffers: "1GB"
+        effective_cache_size: "3GB"
+        work_mem: "32MB"
+        maintenance_work_mem: "1GB"
+        max_connections: "300"
+        shared_preload_libraries: "pg_search" # Ensure pg_search is loaded in production
+
+        # Conservative logging
+        log_min_duration_statement: "5000"  # Log queries > 5s
+        log_statement: "ddl"  # Log only DDL statements
