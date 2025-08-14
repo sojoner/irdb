@@ -9,6 +9,13 @@ CREATE EXTENSION IF NOT EXISTS pg_search;
 -- Create schema for AI applications
 CREATE SCHEMA IF NOT EXISTS ai_data;
 
+-- Grant permissions on the schema to postgres user (default superuser)
+GRANT ALL ON SCHEMA ai_data TO postgres;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ai_data TO postgres;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA ai_data TO postgres;
+ALTER DEFAULT PRIVILEGES IN SCHEMA ai_data GRANT ALL ON TABLES TO postgres;
+ALTER DEFAULT PRIVILEGES IN SCHEMA ai_data GRANT ALL ON SEQUENCES TO postgres;
+
 -- Create tables for RAG applications
 CREATE TABLE ai_data.documents (
     id SERIAL PRIMARY KEY,

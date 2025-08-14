@@ -51,12 +51,7 @@ COPY postgresql.conf /etc/postgresql/postgresql.conf
 # Copy initialization scripts
 COPY docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
 
-# Enable all required extensions in the database
-RUN echo "CREATE EXTENSION IF NOT EXISTS pg_search;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
-    echo "CREATE EXTENSION IF NOT EXISTS vector;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
-    echo "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
-    echo "CREATE EXTENSION IF NOT EXISTS pg_trgm;" >> /docker-entrypoint-initdb.d/00-extensions.sql && \
-    echo "CREATE EXTENSION IF NOT EXISTS btree_gin;" >> /docker-entrypoint-initdb.d/00-extensions.sql
+# Extensions are created via the mounted initialization scripts
 
 # Set up user
 USER postgres

@@ -1,6 +1,72 @@
 # AI-Enhanced PostgreSQL Platform
 
-This project provides a Dockerized PostgreSQL environment with AI/ML extensions optimized for RAG (Retrieval Augmented Generation) applications.
+This project provides a Dockerized PostgreSQL environment with AI/ML extensions optimized for RAG (Retrieval Augmented Generation) applications, including pgAdmin web interface for database management.
+
+## Quick Start Guide
+
+### Prerequisites
+- Docker and Docker Compose installed
+- Docker login credentials for pushing images
+- Docker context set to `<HOST>` (if using special remote context)
+
+### Step-by-Step Setup
+
+1. **Clone and navigate to the project**
+   ```bash
+   git clone <repository-url>
+   cd irdb
+   ```
+
+2. **Build the Docker image**
+   ```bash
+   docker build -t <USER>/database:0.0.1 .
+   ```
+
+3. **Push the image to Docker registry** (optional)
+   ```bash
+   docker push <USER>/database:0.0.1
+   ```
+
+4. **Set Docker context** (if using remote Docker host)
+   ```bash
+   docker context use <HOST>
+   ```
+
+5. **Start the services**
+   ```bash
+   docker-compose up -d
+   ```
+
+6. **Access the services**
+   - **PostgreSQL Database**: `localhost:5432`
+     - Username: `postgres`
+     - Password: `custom_secure_password_123`
+     - Database: `database`
+   
+   - **pgAdmin Web Interface**: `localhost:5433`
+     - Email: `admin@database.com`
+     - Password: `custom_secure_password_123`
+
+7. **Connect to database via pgAdmin**
+   - Open `http://localhost:5433` in your browser.
+   - Log in with the pgAdmin credentials provided above.
+   - The "Database Server" connection is pre-configured and will appear automatically in the server list, with passwordless access enabled.
+
+### Passwordless pgAdmin Configuration
+
+This project is configured for a seamless pgAdmin experience. The `docker-compose.yml` file is set up to automatically create the necessary server configuration and password files within the `pgadmin` container.
+
+- **Server Configuration**: The server connection details are embedded directly in the `docker-compose.yml` entrypoint. This ensures that the "Database Server" appears automatically in pgAdmin upon first login.
+- **Passwordless Login**: The PostgreSQL connection password is also embedded in the entrypoint. The script creates a `pgpass` file with the correct credentials and sets strict `600` permissions, allowing pgAdmin to connect to the database without prompting for a password.
+
+This setup simplifies the initial connection process and is ideal for local development and home lab environments.
+
+### Resource Allocation
+The database container is configured with:
+- **CPU**: 8 cores max, 4 cores reserved
+- **Memory**: 32GB max, 16GB reserved
+- **Storage**: 800GB available via `/data/database`
+- **Shared Memory**: 2GB for PostgreSQL operations
 
 ## Features
 

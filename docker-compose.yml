@@ -1,0 +1,60 @@
+services:
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@database.com
+      PGADMIN_DEFAULT_PASSWORD: custom_secure_password_123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    user: root
+    entrypoint: >
+      /bin/sh -c "
+      mkdir -p /var/lib/pgadmin &&
+      echo '{\"Servers\":{\"1\":{\"Name\":\"Database Server\",\"Group\":\"Servers\",\"Host\":\"database\",\"Port\":5432,\"MaintenanceDB\":\"database\",\"Username\":\"postgres\",\"PassFile\":\"/var/lib/pgadmin/pgpass\",\"SSLMode\":\"prefer\",\"Favorite\":true}}}' > /pgadmin4/servers.json &&
+      echo 'database:5432:database:postgres:custom_secure_password_123' > /var/lib/pgadmin/pgpass &&
+      chown 5050:5050 /var/lib/pgadmin/pgpass &&
+      chmod 600 /var/lib/pgadmin/pgpass &&
+      /entrypoint.sh
+      "
+    ports:
+      - "5433:80"
+    volumes: []
+    networks:
+      - database-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+  postgres:
+    image: sojoner/database:0.0.7
+    build:
+      context: .
+    container_name: database
+    environment:
+      POSTGRES_PASSWORD: custom_secure_password_123  
+      POSTGRES_DB: database
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+    networks:
+      - database-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0'
+          memory: 32G
+        reservations:
+          cpus: '4.0'
+          memory: 16G
+    shm_size: 2g
+
+volumes:
+  pgdata:
+  pgadmin_data:
+
+networks:
+  database-network:
+    driver: bridge
