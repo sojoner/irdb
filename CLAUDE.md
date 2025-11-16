@@ -165,6 +165,46 @@ SELECT * FROM ai_data.hybrid_search(
 );
 ```
 
+## Kubernetes Deployment
+
+The project includes Kubernetes manifests for deploying IR DB using **CloudNativePG** (CNCF Sandbox PostgreSQL operator).
+
+### Quick Start (kind cluster)
+```bash
+# Run automated setup
+./k8s/setup.sh
+
+# Or manually:
+kind create cluster --config kind-config.yaml
+helm install cnpg --namespace cnpg-system --create-namespace cnpg/cloudnative-pg
+kubectl apply -k k8s/overlays/dev/
+
+# Verify deployment
+./k8s/verify-extensions.sh
+```
+
+### Image Tagging Requirement
+CloudNativePG requires the PostgreSQL version in the image tag:
+```bash
+docker tag sojoner/database:0.0.7 sojoner/database:17
+docker push sojoner/database:17
+```
+
+### Accessing the Database
+```bash
+# Via NodePort (mapped through kind)
+psql -h localhost -U postgres -d database -p 5432
+
+# Or via port-forward
+kubectl port-forward -n irdb svc/irdb-postgres-rw 5432:5432
+```
+
+### Kustomize Structure
+- `k8s/base/` - Base configuration (3 instances, production-ready)
+- `k8s/overlays/dev/` - Development overlay (1 instance, lower resources)
+
+See `k8s/README.md` for detailed documentation.
+
 ## Important Notes
 
 - The pgAdmin container runs as root to set up passwordless access via pgpass file
@@ -172,3 +212,4 @@ SELECT * FROM ai_data.hybrid_search(
 - To re-run initialization scripts, must remove volumes: `docker-compose down -v`
 - ParadeDB extensions are built from a specific version tag (v0.17.2) - update Dockerfile to change versions
 - Default credentials are hardcoded in docker-compose.yml - change for production use
+- For Kubernetes deployments, CloudNativePG handles automatic failover and high availability

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: irdb
+  labels:
+    app: irdb
+    environment: dev

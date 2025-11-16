@@ -1,0 +1,21 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: irdb-postgres
+  namespace: irdb
+spec:
+  # For development, we can use a single instance
+  instances: 1
+
+  # Smaller storage for dev
+  storage:
+    size: 5Gi
+
+  # Lower resource requirements for local development
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"

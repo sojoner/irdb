@@ -1,0 +1,78 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: irdb-postgres
+  namespace: irdb
+spec:
+  # Use our custom IR DB image with pgvector and ParadeDB extensions
+  # IMPORTANT: CloudNativePG requires the PostgreSQL version in the image tag
+  # Our image is built on postgres:17.5, so we use the 17 tag
+  imageName: sojoner/database:17
+
+  instances: 3
+
+  # PostgreSQL configuration
+  postgresql:
+    parameters:
+      # Memory settings optimized for AI workloads
+      shared_buffers: "256MB"
+      effective_cache_size: "1GB"
+      work_mem: "16MB"
+      maintenance_work_mem: "512MB"
+
+      # Vector search optimization
+      max_parallel_workers: "4"
+      max_parallel_workers_per_gather: "2"
+      max_parallel_maintenance_workers: "2"
+
+      # Extensions
+      shared_preload_libraries: "pg_stat_statements,pg_search,vector"
+
+      # Logging
+      log_statement: "mod"
+      log_min_duration_statement: "1000"
+      log_checkpoints: "on"
+      log_connections: "on"
+      log_disconnections: "on"
+
+  # Bootstrap with initdb
+  bootstrap:
+    initdb:
+      database: database
+      owner: postgres
+      secret:
+        name: irdb-postgres-superuser
+
+  # Storage configuration
+  storage:
+    size: 10Gi
+    storageClass: standard
+
+  # Monitoring
+  monitoring:
+    enablePodMonitor: false
+
+  # Resources
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+  # High Availability
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
+
+  # Backup configuration (optional, can be enabled later)
+  # backup:
+  #   barmanObjectStore:
+  #     destinationPath: s3://backups/
+  #     s3Credentials:
+  #       accessKeyId:
+  #         name: backup-creds
+  #         key: ACCESS_KEY_ID
+  #       secretAccessKey:
+  #         name: backup-creds
+  #         key: ACCESS_SECRET_KEY

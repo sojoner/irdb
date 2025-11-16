@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: irdb-postgres-nodeport
+  namespace: irdb
+  labels:
+    app: irdb-postgres
+spec:
+  type: NodePort
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      nodePort: 30432
+  selector:
+    cnpg.io/cluster: irdb-postgres
+    role: primary
