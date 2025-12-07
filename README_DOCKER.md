@@ -76,19 +76,6 @@ psql -h localhost -U postgres -d database -p 5432
 # Password: custom_secure_password_123
 ```
 
-**Verify extensions:**
-```sql
-SELECT extname, extversion FROM pg_extension WHERE extname IN ('vector', 'pg_search');
-```
-
-**Expected output:**
-```
-  extname  | extversion
------------+------------
- pg_search | 0.17.2
- vector    | 0.8.0
-```
-
 ### Option 2: pgAdmin Web Interface
 
 1. Open browser to `http://localhost:5433`
@@ -104,40 +91,7 @@ SELECT extname, extversion FROM pg_extension WHERE extname IN ('vector', 'pg_sea
 
 4. Navigate to: Servers → Database Server → Databases → database
 
-## Verifying the Setup
-
-### Check Schema and Tables
-
-```sql
--- List schemas
-\dn
-
--- Should show: ai_data, public, information_schema, pg_catalog
-
--- List tables in ai_data
-\dt ai_data.*
-
--- Should show:
---   ai_data.documents
---   ai_data.chunks
-```
-
-### Test Hybrid Search
-
-```sql
--- Insert test document
-INSERT INTO ai_data.documents (title, content, embedding) VALUES
-('Test Document', 'This is a test of the hybrid search functionality',
- ai_data.generate_random_vector(1536));
-
--- Run hybrid search
-SELECT * FROM ai_data.hybrid_search(
-  query_text => 'test search',
-  query_embedding => ai_data.generate_random_vector(1536),
-  similarity_threshold => 0.0,
-  limit_count => 10
-);
-```
+**For database schema, SQL examples, and validation queries, see [README.md](README.md).**
 
 ## Common Operations
 
@@ -423,20 +377,30 @@ psql -h localhost -U postgres -d database -p 5432 < backup_20240101.sql
 
 ## Migrating to Kubernetes
 
-When ready for production, migrate to Kubernetes using the Helm chart:
+When ready for production deployment with high availability, you can migrate to Kubernetes using the Helm chart with CloudNativePG operator.
+
+**Prerequisites:**
+- Push your custom image to a container registry
+- Kubernetes cluster with CloudNativePG operator installed
 
 ```bash
-# Build and push image
+# Build and push image to registry
 docker build -t sojoner/database:0.0.7 .
 docker push sojoner/database:0.0.7
 
-# Deploy to Kubernetes
+# Deploy to Kubernetes (see README_K8s.md for prerequisites)
 cd k8s/
 helm dependency update
 helm install irdb-postgres . -n databases --create-namespace -f values-prod.yaml
 ```
 
-See [README_K8s.md](README_K8s.md) for complete Kubernetes deployment guide.
+**See [README_K8s.md](README_K8s.md) for complete Kubernetes deployment guide including:**
+- CloudNativePG operator installation
+- High availability setup (3+ instances)
+- Storage configuration and best practices
+- Backup and recovery
+- Monitoring with Prometheus
+- Production deployment checklist
 
 ## Next Steps
 

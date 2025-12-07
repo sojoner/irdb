@@ -14,44 +14,49 @@ PostgreSQL 17.5 with pgvector and ParadeDB extensions, optimized for RAG (Retrie
 
 ## Quick Start
 
-### Docker Compose (Recommended for Local Development)
+Choose your deployment method:
+
+### Docker Compose (Local Development)
+
+Best for local development and testing. Includes PostgreSQL + pgAdmin web interface.
 
 ```bash
-# Build the image
+# Build and start
 docker build -t sojoner/database:0.0.7 .
-
-# Start PostgreSQL + pgAdmin
 docker-compose up -d
 
-# Connect to database
+# Connect
 psql -h localhost -U postgres -d database -p 5432
-# Password: custom_secure_password_123
-
-# Access pgAdmin web interface
-open http://localhost:5433
-# Email: admin@database.com
-# Password: custom_secure_password_123
 ```
 
-**See [README_DOCKER.md](README_DOCKER.md) for complete Docker guide.**
+**See [README_DOCKER.md](README_DOCKER.md) for complete guide including:**
+- Detailed setup instructions
+- pgAdmin configuration
+- Backup and restore
+- Performance tuning
+- Troubleshooting
 
 ### Kubernetes (Production Deployment)
 
+Production-ready deployment with high availability using CloudNativePG operator.
+
 ```bash
-# Install CloudNativePG operator
+# Install operator
 helm repo add cnpg https://cloudnative-pg.github.io/charts
 helm install cnpg --namespace cnpg-system --create-namespace cnpg/cloudnative-pg
 
-# Deploy IR DB (development)
+# Deploy database
 cd k8s/
 helm dependency update
-helm install irdb-postgres . -n databases --create-namespace -f values-dev.yaml
-
-# Deploy IR DB (production with HA)
 helm install irdb-postgres . -n databases --create-namespace -f values-prod.yaml
 ```
 
-**See [README_K8s.md](README_K8s.md) for complete Kubernetes guide.**
+**See [README_K8s.md](README_K8s.md) for complete guide including:**
+- Kubernetes setup and prerequisites
+- High availability configuration
+- Scaling and updates
+- Monitoring and backups
+- Troubleshooting
 
 ## Database Schema
 
@@ -207,39 +212,74 @@ shared_preload_libraries = 'pg_stat_statements,pg_search,vector'
 | Kubernetes Helm | Production, staging, multi-node | [README_K8s.md](README_K8s.md) |
 | ArgoCD GitOps | Production CD pipeline | [README_K8s.md](README_K8s.md#deploying-from-github-argocd) |
 
-## Common Tasks
+## Common Database Operations
 
-### Rebuild After Schema Changes
+### Querying Extensions
 
-```bash
-# Docker Compose (removes all data)
-docker-compose down -v
-docker-compose up -d --build
+```sql
+-- List all installed extensions
+SELECT extname, extversion FROM pg_extension;
 
-# Kubernetes (rolling update)
-helm upgrade irdb-postgres k8s/ -n databases
+-- Check specific AI/ML extensions
+SELECT extname, extversion
+FROM pg_extension
+WHERE extname IN ('vector', 'pg_search', 'pg_stat_statements', 'pg_trgm');
 ```
 
-### Scale Kubernetes Deployment
+### Managing Documents
 
-```bash
-# Scale to 5 instances
-helm upgrade irdb-postgres k8s/ \
-  --set cnpg.cluster.instances=5 \
-  -n databases
+```sql
+-- Insert a document with embedding
+INSERT INTO ai_data.documents (title, content, embedding, metadata)
+VALUES (
+  'Sample Document',
+  'This is sample content for testing',
+  ai_data.generate_random_vector(1536),
+  '{"category": "test", "tags": ["sample", "demo"]}'::jsonb
+);
+
+-- Update document metadata
+UPDATE ai_data.documents
+SET metadata = metadata || '{"updated_at": "2025-12-07"}'::jsonb
+WHERE id = 1;
+
+-- Delete old documents
+DELETE FROM ai_data.documents
+WHERE created_at < NOW() - INTERVAL '90 days';
 ```
 
-### Update Image Version
+### Performance Monitoring
 
-```bash
-# Docker Compose
-docker build -t sojoner/database:0.0.8 .
-docker-compose up -d --build
+```sql
+-- View slow queries (requires pg_stat_statements)
+SELECT
+  query,
+  mean_exec_time,
+  calls,
+  total_exec_time
+FROM pg_stat_statements
+ORDER BY mean_exec_time DESC
+LIMIT 10;
 
-# Kubernetes
-helm upgrade irdb-postgres k8s/ \
-  --set image.tag=0.0.8 \
-  -n databases
+-- Check table sizes
+SELECT
+  schemaname,
+  tablename,
+  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+FROM pg_tables
+WHERE schemaname = 'ai_data'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+
+-- Check index usage
+SELECT
+  schemaname,
+  tablename,
+  indexname,
+  idx_scan as index_scans,
+  pg_size_pretty(pg_relation_size(indexrelid)) as index_size
+FROM pg_stat_user_indexes
+WHERE schemaname = 'ai_data'
+ORDER BY idx_scan;
 ```
 
 ## Project Structure
@@ -291,53 +331,75 @@ irdb/
 
 ## Troubleshooting
 
-### Extensions Not Found
+### Common Issues
 
-```bash
-# Verify extensions are installed
-psql -h localhost -U postgres -d database -c "SELECT extname, extversion FROM pg_extension;"
+**Extensions Not Found:**
+```sql
+-- Verify extensions are installed
+SELECT extname, extversion FROM pg_extension
+WHERE extname IN ('vector', 'pg_search');
 
-# If missing, rebuild without cache
-docker-compose down -v
-docker build --no-cache -t sojoner/database:0.0.7 .
-docker-compose up -d
+-- Expected: vector 0.8.0, pg_search 0.17.2
 ```
 
-### Init Scripts Not Running
+If extensions are missing, the initialization scripts may not have run. This typically means the database was already initialized. See deployment-specific guides for solutions:
+- **Docker Compose**: [README_DOCKER.md](README_DOCKER.md#troubleshooting)
+- **Kubernetes**: [README_K8s.md](README_K8s.md#troubleshooting)
 
+**Schema Not Found:**
 ```sql
 -- Check if ai_data schema exists
 SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'ai_data';
 
--- If missing, volumes weren't removed
--- Docker Compose:
-docker-compose down -v  # This removes volumes
-docker-compose up -d
-
--- Kubernetes:
-helm uninstall irdb-postgres -n databases
-kubectl delete pvc -n databases -l cnpg.io/cluster=postgres
-helm install irdb-postgres k8s/ -n databases
+-- List tables in schema
+\dt ai_data.*
 ```
 
-### Out of Memory
+If schema is missing, initialization scripts didn't run. Refer to deployment guide for your platform.
 
-```bash
-# Reduce PostgreSQL memory settings in postgresql.conf
-shared_buffers = 128MB
-effective_cache_size = 512MB
-work_mem = 8MB
+**Query Performance Issues:**
+```sql
+-- Check if indexes are being used
+EXPLAIN ANALYZE
+SELECT * FROM ai_data.documents
+WHERE to_tsvector('english', title || ' ' || content)
+      @@ to_tsquery('english', 'search & term');
 
-# Or increase Docker memory limit
-# Docker Desktop: Settings → Resources → Memory
+-- Should show "Index Scan" in output
+
+-- Check index health
+SELECT
+  schemaname,
+  tablename,
+  indexname,
+  idx_scan,
+  pg_size_pretty(pg_relation_size(indexrelid))
+FROM pg_stat_user_indexes
+WHERE schemaname = 'ai_data';
 ```
+
+### Deployment-Specific Troubleshooting
+
+For issues related to your deployment method:
+- **Docker Compose**: See [README_DOCKER.md - Troubleshooting](README_DOCKER.md#troubleshooting)
+- **Kubernetes**: See [README_K8s.md - Troubleshooting](README_K8s.md#troubleshooting)
 
 ## Documentation
 
-- **[README_DOCKER.md](README_DOCKER.md)** - Complete Docker Compose deployment guide
-- **[README_K8s.md](README_K8s.md)** - Complete Kubernetes/Helm deployment guide
-- **[k8s/README.md](k8s/README.md)** - Helm chart reference documentation
-- **[.claude/CLAUDE.md](.claude/CLAUDE.md)** - Development guide for Claude Code
+### Deployment Guides
+
+- **[README_DOCKER.md](README_DOCKER.md)** - Docker Compose deployment for local development
+  - pgAdmin setup, backup/restore, performance tuning, Docker-specific troubleshooting
+
+- **[README_K8s.md](README_K8s.md)** - Kubernetes deployment with CloudNativePG operator
+  - High availability, scaling, monitoring, Kubernetes-specific troubleshooting
+
+- **[k8s/README.md](k8s/README.md)** - Helm chart reference and CloudNativePG best practices
+  - Chart configuration, resource management, backup strategies, production checklist
+
+### Developer Resources
+
+- **[.claude/CLAUDE.md](.claude/CLAUDE.md)** - Development guide for contributors using Claude Code
 
 ## Resources
 

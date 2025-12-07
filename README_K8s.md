@@ -1,21 +1,20 @@
-# IR DB Deployment Guide
+# Kubernetes Deployment Guide
 
-This guide covers deploying the IR DB (AI-enhanced PostgreSQL 17 with pgvector and ParadeDB) using **Docker Compose** or **Kubernetes** with CloudNativePG operator.
+Complete guide for deploying IR DB (AI-enhanced PostgreSQL 17 with pgvector and ParadeDB) on Kubernetes using CloudNativePG operator.
 
 ## Table of Contents
 
-1. [Docker Compose Setup](#docker-compose-setup)
-2. [Kubernetes Setup](#kubernetes-setup)
-3. [Validation Examples](#validation-examples)
-4. [Troubleshooting](#troubleshooting)
+1. [Prerequisites](#prerequisites)
+2. [Quick Start](#quick-start-kind-cluster)
+3. [Deploying the Database](#deploying-the-database)
+4. [Customizing the Deployment](#customizing-the-deployment)
+5. [Accessing the Database](#accessing-the-database)
+6. [Managing the Deployment](#managing-the-deployment)
+7. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Kubernetes Setup
-
-Deploy IR DB on Kubernetes using Helm with CloudNativePG operator.
-
-### Prerequisites
+## Prerequisites
 
 Install required tools:
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) - Kubernetes CLI
@@ -302,338 +301,22 @@ kubectl delete pvc -n databases -l cnpg.io/cluster=postgres
 kubectl delete namespace databases
 ```
 
----
+**For database schema, SQL examples, and validation queries, see [README.md](README.md).**
 
-## Validation Examples
+### Validation with Makefile
 
-### Extension Verification
+The project includes Makefile targets for quick validation after deployment:
 
-Check all required extensions are installed:
-
-```sql
--- Connect to database first
--- Docker Compose: psql -h localhost -U postgres -d database -p 5432
--- Kubernetes: make connect
-
--- List all extensions
-SELECT extname, extversion
-FROM pg_extension
-WHERE extname IN ('vector', 'pg_search', 'pg_stat_statements', 'pg_trgm', 'btree_gin')
-ORDER BY extname;
-```
-
-**Expected output:**
-```
-    extname     | extversion
-----------------+------------
- btree_gin      | 1.3
- pg_search      | 0.17.2
- pg_stat_statements | 1.10
- pg_trgm        | 1.6
- vector         | 0.8.0
-```
-
-### BM25 Full-Text Search Validation
-
-#### Using Makefile (Kubernetes only):
 ```bash
-make validate-bm25
-```
-
-#### Manual SQL:
-
-```sql
--- 1. Insert test documents
-INSERT INTO ai_data.documents (title, content, metadata, embedding) VALUES
-('PostgreSQL Database Guide', 'PostgreSQL is a powerful open-source relational database system',
- '{"category": "database", "language": "english"}'::jsonb,
- ai_data.generate_random_vector(1536)),
-('ParadeDB Search Tutorial', 'ParadeDB extends PostgreSQL with full-text search and BM25 ranking',
- '{"category": "tutorial", "language": "english"}'::jsonb,
- ai_data.generate_random_vector(1536)),
-('Vector Embeddings Guide', 'Using pgvector for semantic similarity search with embeddings',
- '{"category": "guide", "language": "english"}'::jsonb,
- ai_data.generate_random_vector(1536)),
-('Machine Learning with PostgreSQL', 'Integrate ML models with PostgreSQL using pgvector',
- '{"category": "ml", "language": "english"}'::jsonb,
- ai_data.generate_random_vector(1536));
-
--- 2. Test BM25 search for "PostgreSQL"
-SELECT
-    id,
-    title,
-    ts_rank(
-        to_tsvector('english', title || ' ' || content),
-        to_tsquery('english', 'PostgreSQL')
-    ) as bm25_score
-FROM ai_data.documents
-WHERE to_tsvector('english', title || ' ' || content) @@ to_tsquery('english', 'PostgreSQL')
-ORDER BY bm25_score DESC
-LIMIT 5;
-```
-
-**Expected output:**
-```
- id |            title                  | bm25_score
-----+-----------------------------------+------------
-  1 | PostgreSQL Database Guide         |   0.151395
-  4 | Machine Learning with PostgreSQL  |   0.0759878
-  2 | ParadeDB Search Tutorial          |   0.0607903
-```
-
-#### Advanced BM25 Queries:
-
-```sql
--- Multi-term search with AND operator
-SELECT id, title,
-    ts_rank(to_tsvector('english', title || ' ' || content),
-            to_tsquery('english', 'search & PostgreSQL')) as score
-FROM ai_data.documents
-WHERE to_tsvector('english', title || ' ' || content)
-      @@ to_tsquery('english', 'search & PostgreSQL')
-ORDER BY score DESC;
-
--- Multi-term search with OR operator
-SELECT id, title,
-    ts_rank(to_tsvector('english', title || ' ' || content),
-            to_tsquery('english', 'vector | embedding')) as score
-FROM ai_data.documents
-WHERE to_tsvector('english', title || ' ' || content)
-      @@ to_tsquery('english', 'vector | embedding')
-ORDER BY score DESC;
-
--- Phrase search (using plainto_tsquery for simpler syntax)
-SELECT id, title,
-    ts_rank(to_tsvector('english', title || ' ' || content),
-            plainto_tsquery('english', 'similarity search')) as score
-FROM ai_data.documents
-WHERE to_tsvector('english', title || ' ' || content)
-      @@ plainto_tsquery('english', 'similarity search')
-ORDER BY score DESC;
-```
-
-### Vector Similarity Search Validation
-
-#### Using Makefile (Kubernetes only):
-```bash
-make validate-vector
-```
-
-#### Manual SQL:
-
-```sql
--- 1. Generate a query vector
-WITH query_vector AS (
-    SELECT ai_data.generate_random_vector(1536) as qv
-)
-
--- 2. Find similar documents using cosine distance
-SELECT
-    d.id,
-    d.title,
-    1 - (d.embedding <=> query_vector.qv) as cosine_similarity,
-    d.embedding <-> query_vector.qv as l2_distance,
-    d.embedding <#> query_vector.qv as inner_product
-FROM ai_data.documents d, query_vector
-ORDER BY d.embedding <=> query_vector.qv
-LIMIT 5;
-```
-
-**Expected output:**
-```
- id |            title                  | cosine_similarity | l2_distance | inner_product
-----+-----------------------------------+-------------------+-------------+--------------
-  3 | Vector Embeddings Guide           |          0.985432 |    0.234567 |      -123.45
-  4 | Machine Learning with PostgreSQL  |          0.978234 |    0.267891 |      -134.56
-  1 | PostgreSQL Database Guide         |          0.972156 |    0.289123 |      -145.67
-```
-
-#### Understanding Vector Distance Operators:
-
-```sql
--- <=> : Cosine distance (0 = identical, 2 = opposite)
--- <-> : Euclidean (L2) distance
--- <#> : Negative inner product
-
--- Example: Find documents within a similarity threshold
-WITH query_vector AS (
-    SELECT ai_data.generate_random_vector(1536) as qv
-)
-SELECT
-    d.id,
-    d.title,
-    1 - (d.embedding <=> query_vector.qv) as similarity
-FROM ai_data.documents d, query_vector
-WHERE 1 - (d.embedding <=> query_vector.qv) > 0.8  -- Only >= 80% similar
-ORDER BY d.embedding <=> query_vector.qv
-LIMIT 10;
-```
-
-### Hybrid Search Validation (Vector + BM25)
-
-#### Using Makefile (Kubernetes only):
-```bash
-make validate-hybrid
-```
-
-#### Manual SQL:
-
-```sql
--- The hybrid_search function combines vector and text search
--- 70% weight on vector similarity, 30% on BM25 text score
-
--- Generate a query vector for demonstration
-WITH query_vec AS (
-    SELECT ai_data.generate_random_vector(1536) as qv
-)
-
--- Call the hybrid search function
-SELECT
-    id,
-    title,
-    vector_similarity,
-    text_score,
-    combined_score
-FROM ai_data.hybrid_search(
-    query_text => 'PostgreSQL database search',
-    query_embedding => (SELECT qv FROM query_vec),
-    similarity_threshold => 0.0,  -- Accept all similarities for demo
-    limit_count => 5
-)
-ORDER BY combined_score DESC;
-```
-
-**Expected output:**
-```
- id |            title                  | vector_similarity | text_score | combined_score
-----+-----------------------------------+-------------------+------------+---------------
-  2 | ParadeDB Search Tutorial          |          0.982134 |   0.151395 |       0.732536
-  1 | PostgreSQL Database Guide         |          0.975421 |   0.121234 |       0.719165
-  3 | Vector Embeddings Guide           |          0.968234 |   0.098765 |       0.707427
-```
-
-#### Understanding the Hybrid Search:
-
-The `hybrid_search` function performs:
-1. **Vector search**: Finds semantically similar documents
-2. **Text search**: Finds keyword matches using BM25
-3. **Combines results**: `combined_score = (vector_similarity * 0.7) + (text_score * 0.3)`
-
-```sql
--- Adjust weights by modifying the function
--- Or create a custom query:
-
-WITH
-query_vec AS (
-    SELECT ai_data.generate_random_vector(1536) as qv
-),
-vector_results AS (
-    SELECT
-        id, title, content,
-        1 - (embedding <=> (SELECT qv FROM query_vec)) as vec_sim
-    FROM ai_data.documents
-    ORDER BY embedding <=> (SELECT qv FROM query_vec)
-    LIMIT 20
-),
-text_results AS (
-    SELECT
-        id, title, content,
-        ts_rank(to_tsvector('english', title || ' ' || content),
-                plainto_tsquery('english', 'your search terms')) as txt_score
-    FROM ai_data.documents
-    WHERE to_tsvector('english', title || ' ' || content)
-          @@ plainto_tsquery('english', 'your search terms')
-    ORDER BY txt_score DESC
-    LIMIT 20
-)
-SELECT
-    COALESCE(vr.id, tr.id) as id,
-    COALESCE(vr.title, tr.title) as title,
-    COALESCE(vr.vec_sim, 0.0) as vector_similarity,
-    COALESCE(tr.txt_score, 0.0) as text_score,
-    (COALESCE(vr.vec_sim, 0.0) * 0.5 + COALESCE(tr.txt_score, 0.0) * 0.5) as combined_score
-FROM vector_results vr
-FULL OUTER JOIN text_results tr ON vr.id = tr.id
-ORDER BY combined_score DESC
-LIMIT 10;
-```
-
-### Performance Testing
-
-#### Test Index Usage:
-
-```sql
--- Check if vector index is being used
-EXPLAIN ANALYZE
-SELECT id, title, 1 - (embedding <=> ai_data.generate_random_vector(1536)) as similarity
-FROM ai_data.documents
-ORDER BY embedding <=> ai_data.generate_random_vector(1536)
-LIMIT 10;
-
--- Should show "Index Scan using documents_embedding_idx"
-
--- Check if text index is being used
-EXPLAIN ANALYZE
-SELECT id, title
-FROM ai_data.documents
-WHERE to_tsvector('english', title || ' ' || content)
-      @@ to_tsquery('english', 'PostgreSQL & search');
-
--- Should show "Bitmap Index Scan on idx_documents_title_content"
-```
-
-#### Bulk Insert Performance:
-
-```sql
--- Insert 1000 test documents with random vectors
-INSERT INTO ai_data.documents (title, content, embedding)
-SELECT
-    'Test Document ' || generate_series,
-    'This is test content for document ' || generate_series,
-    ai_data.generate_random_vector(1536)
-FROM generate_series(1, 1000);
-
--- Verify count
-SELECT COUNT(*) FROM ai_data.documents;
+make validate-bm25     # Test BM25 full-text search
+make validate-vector   # Test vector similarity search
+make validate-hybrid   # Test hybrid search (vector + BM25)
+make validate-all      # Run all validation tests
 ```
 
 ---
 
 ## Troubleshooting
-
-### Docker Compose Issues
-
-**Problem: Services won't start**
-```bash
-# Check if ports are already in use
-lsof -i :5432
-lsof -i :5433
-
-# Kill processes using these ports or change ports in docker-compose.yml
-```
-
-**Problem: Extensions not loading**
-```bash
-# Check PostgreSQL logs
-docker-compose logs postgres | grep -i error
-
-# Verify initialization scripts ran
-docker-compose logs postgres | grep "docker-entrypoint-initdb.d"
-
-# If scripts didn't run, database already existed
-# Must remove volumes to re-run initialization
-docker-compose down -v
-docker-compose up -d
-```
-
-**Problem: Out of memory**
-```bash
-# Reduce PostgreSQL memory settings in postgresql.conf
-# Or allocate more memory to Docker
-
-# Check Docker memory limit
-docker stats
-```
 
 ### Kubernetes Issues
 
@@ -724,27 +407,15 @@ helm dependency build k8s/
 ### Validation Failures
 
 **Problem: "relation does not exist" errors**
-```sql
--- Check if ai_data schema exists
-SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'ai_data';
-
--- If missing, initialization scripts didn't run
--- For Kubernetes, delete and recreate the cluster resource
--- For Docker Compose, remove volumes and restart
-```
+- This indicates initialization scripts didn't run properly
+- For Kubernetes: Delete and recreate the cluster resource
+- Check logs: `kubectl logs -n databases postgres-1 | grep "docker-entrypoint-initdb.d"`
+- See [README.md](README.md) for database schema verification queries
 
 **Problem: Vector dimension mismatch**
-```sql
--- Check current vector dimensions
-SELECT column_name, udt_name
-FROM information_schema.columns
-WHERE table_schema = 'ai_data'
-  AND table_name = 'documents'
-  AND column_name = 'embedding';
-
--- If you need different dimensions, update 01-ai-extensions.sql
--- Then rebuild/redeploy
-```
+- If you need different dimensions, update `01-ai-extensions.sql`
+- Rebuild the Docker image and redeploy
+- See [README.md](README.md) for database validation queries
 
 ### Getting Help
 
@@ -760,13 +431,13 @@ WHERE table_schema = 'ai_data'
 
 ### Connection Details
 
-| Parameter | Docker Compose | Kubernetes (NodePort) |
-|-----------|---------------|---------------------|
-| Host | localhost | localhost |
-| Port | 5432 | 5432 |
-| Database | database | database |
-| Username | postgres | postgres |
-| Password | custom_secure_password_123 | custom_secure_password_123 |
+| Parameter | Value |
+|-----------|-------|
+| Host | localhost (via port-forward) or service DNS |
+| Port | 5432 |
+| Database | database |
+| Username | postgres |
+| Password | Retrieved from secret |
 
 ### Important File Locations
 
@@ -786,22 +457,45 @@ WHERE table_schema = 'ai_data'
 ### Useful Commands
 
 ```bash
-# Docker Compose
-docker-compose up -d   # Start services
-docker-compose down -v # Stop and clean
-docker-compose logs -f # View logs
-
-# Helm (Kubernetes)
+# Helm Commands
 helm install irdb-postgres k8s/ -n databases -f k8s/values-dev.yaml   # Install
 helm upgrade irdb-postgres k8s/ -n databases                          # Upgrade
 helm uninstall irdb-postgres -n databases                             # Uninstall
 helm list -n databases                                                # List releases
 helm history irdb-postgres -n databases                               # Show history
 
-# Kubernetes
-kubectl get all -n databases                    # Show all resources
-kubectl get cluster -n databases                # Show cluster status
-kubectl logs -n databases postgres-1 -f         # Follow logs
+# Kubernetes Commands
+kubectl get all -n databases                                          # Show all resources
+kubectl get cluster -n databases                                      # Show cluster status
+kubectl logs -n databases postgres-1 -f                               # Follow logs
 kubectl exec -it -n databases postgres-1 -- psql -U postgres -d database  # Connect to DB
 kubectl port-forward -n databases svc/postgres-rw 5432:5432           # Port-forward
+
+# Get database password
+kubectl get secret postgres-superuser -n databases -o jsonpath='{.data.password}' | base64 -d
 ```
+
+## Next Steps
+
+- **[README.md](README.md)** - Project overview, architecture, and common database operations
+- **[README_DOCKER.md](README_DOCKER.md)** - Docker Compose guide for local development
+- **[k8s/README.md](k8s/README.md)** - Helm chart reference and CloudNativePG best practices
+- **[.claude/CLAUDE.md](.claude/CLAUDE.md)** - Development guide for contributors
+
+## Additional Resources
+
+**CloudNativePG:**
+- [Official Documentation](https://cloudnative-pg.io/documentation/)
+- [Quickstart Guide](https://cloudnative-pg.io/documentation/current/quickstart/)
+- [GitHub Repository](https://github.com/cloudnative-pg/cloudnative-pg)
+- [Helm Charts](https://github.com/cloudnative-pg/charts)
+
+**PostgreSQL & Extensions:**
+- [PostgreSQL 17 Documentation](https://www.postgresql.org/docs/17/)
+- [pgvector GitHub](https://github.com/pgvector/pgvector)
+- [ParadeDB Documentation](https://docs.paradedb.com/)
+
+**Kubernetes:**
+- [Helm Documentation](https://helm.sh/docs/)
+- [kubectl Reference](https://kubernetes.io/docs/reference/kubectl/)
+- [Kubernetes Storage](https://kubernetes.io/docs/concepts/storage/)
