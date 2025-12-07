@@ -1,0 +1,131 @@
+# Default values for irdb-postgres
+# This chart wraps the CloudNativePG cluster chart with custom image catalog
+
+# Custom image configuration
+image:
+  registry: docker.io
+  repository: sojoner/database
+  tag: "0.0.6"
+  majorVersion: 17
+
+# Catalog configuration
+catalog:
+  enabled: true
+  name: sojoner-catalog
+
+# NodePort service configuration for external access
+nodePort:
+  enabled: false
+  port: 5432
+  # nodePort: 30432  # Uncomment to specify a specific NodePort (30000-32767)
+  externalTrafficPolicy: Local  # Use Local to preserve client IP
+  labels: {}
+  annotations: {}
+
+# CloudNativePG cluster configuration
+# These values are passed to the upstream cluster chart
+cnpg:
+  # PostgreSQL version configuration
+  version:
+    postgresql: "17"
+
+  cluster:
+    name: postgres
+    instances: 3
+
+    # Use standard PostgreSQL UID/GID (999) instead of CNPG default (26)
+    # Required because our custom image uses standard postgres base image
+    postgresUID: 999
+    postgresGID: 999
+
+    # Image catalog reference
+    imageCatalogRef:
+      kind: ClusterImageCatalog
+      name: sojoner-catalog
+      major: 17
+
+    # Storage configuration
+    storage:
+      size: 10Gi
+      # storageClass: local-path  # Uncomment to specify storage class
+
+    # PostgreSQL parameters optimized for AI workloads
+    postgresql:
+      parameters:
+        # Memory settings
+        shared_buffers: "256MB"
+        effective_cache_size: "1GB"
+        work_mem: "16MB"
+        maintenance_work_mem: "512MB"
+
+        # Vector search optimization
+        max_parallel_workers: "4"
+        max_parallel_workers_per_gather: "2"
+        max_parallel_maintenance_workers: "2"
+
+        # Extensions are already configured in the custom image's postgresql.conf
+        # shared_preload_libraries cannot be set here (fixed parameter)
+
+        # Connection settings
+        max_connections: "200"
+
+        # Logging
+        log_statement: "mod"
+        log_min_duration_statement: "1000"
+        log_checkpoints: "on"
+        log_connections: "on"
+        log_disconnections: "on"
+
+        # Write-ahead log
+        wal_buffers: "16MB"
+        min_wal_size: "1GB"
+        max_wal_size: "4GB"
+        checkpoint_completion_target: "0.9"
+
+        # Query planning
+        default_statistics_target: "100"
+        random_page_cost: "1.1"
+        effective_io_concurrency: "200"
+
+    # Bootstrap configuration
+    bootstrap:
+      initdb:
+        database: database
+        owner: postgres
+        # postInitSQL runs after database initialization
+        # Extensions are already created by init scripts in the image
+        postInitSQL:
+          - CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+    # Monitoring
+    monitoring:
+      enablePodMonitor: false  # Set to true if you have Prometheus Operator
+
+    # Resource allocation
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "1000m"
+      limits:
+        memory: "4Gi"
+        cpu: "2000m"
+
+    # High Availability
+    # For 2-node clusters, use minSyncReplicas: 0 (async replication)
+    # For 3+ node clusters, use minSyncReplicas: 1 (sync replication)
+    minSyncReplicas: 1
+    maxSyncReplicas: 1
+
+    # Primary update strategy
+    primaryUpdateStrategy: unsupervised
+
+    # Affinity rules (ensures pods land on different nodes)
+    affinity:
+      enablePodAntiAffinity: true
+      topologyKey: kubernetes.io/hostname
+
+# Environment-specific overrides
+# Create separate values files for different environments:
+# - values-dev.yaml
+# - values-staging.yaml
+# - values-prod.yaml
