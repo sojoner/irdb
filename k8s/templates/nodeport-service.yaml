@@ -28,5 +28,5 @@ spec:
       {{- end }}
   selector:
     cnpg.io/cluster: {{ include "irdb-postgres.clusterName" . }}
-    role: primary
+    cnpg.io/instanceRole: primary
 {{- end }}
