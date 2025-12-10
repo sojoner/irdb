@@ -15,10 +15,10 @@ catalog:
 
 # NodePort service configuration for external access
 nodePort:
-  enabled: false
+  enabled: true
   port: 5432
-  # nodePort: 30432  # Uncomment to specify a specific NodePort (30000-32767)
-  externalTrafficPolicy: Local  # Use Local to preserve client IP
+  nodePort: 30432  # Uncomment to specify a specific NodePort (30000-32767)
+  externalTrafficPolicy: Cluster  # Use Local to preserve client IP
   labels: {}
   annotations: {}
 
