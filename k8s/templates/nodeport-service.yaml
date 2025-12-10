@@ -6,6 +6,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "irdb-postgres.labels" . | nindent 4 }}
+    cnpg.io/cluster: {{ include "irdb-postgres.clusterName" . }}
     {{- with .Values.nodePort.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
