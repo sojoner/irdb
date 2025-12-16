@@ -14,6 +14,12 @@ This directory contains SQL examples demonstrating various search capabilities o
 | `05_complete_setup.sql` | Complete workflow: table creation, indexing, all search types |
 | `06_numeric_range_search.sql` | Numeric field searches with ranges and comparisons |
 | `07_snippet_highlighting.sql` | Search result highlighting with `paradedb.snippet()` |
+| `08_products_schema.sql` | Products schema and indexes for hybrid search testing |
+| `09_products_data.sql` | Load mock product data from JSON file |
+| `10_bm25_search_tests.sql` | BM25 full-text search validation tests |
+| `11_vector_search_tests.sql` | Vector similarity search validation tests |
+| `12_hybrid_search_tests.sql` | Hybrid search combining BM25 and vector search |
+| `13_facet_aggregation_tests.sql` | Faceted search and aggregation tests |
 
 ## Quick Start - Kubernetes Deployment
 
@@ -52,7 +58,7 @@ Expected output:
 psql -h localhost -U postgres -d app -p 5432 -f 01_fuzzy_search.sql
 
 # Run all examples in sequence
-for f in 0*.sql 0[1-7]*.sql; do
+for f in 0*.sql 0[1-9]*.sql 1*.sql; do
     echo "Running $f..."
     psql -h localhost -U postgres -d app -p 5432 -f "$f"
 done

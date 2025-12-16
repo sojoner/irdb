@@ -31,6 +31,26 @@ name = "init_db_test"
 path = "tests/init_db_test.rs"
 harness = true
 
+[[test]]
+name = "products_bm25_test"
+path = "tests/products_bm25_test.rs"
+harness = false
+
+[[test]]
+name = "products_vector_test"
+path = "tests/products_vector_test.rs"
+harness = false
+
+[[test]]
+name = "products_hybrid_test"
+path = "tests/products_hybrid_test.rs"
+harness = false
+
+[[test]]
+name = "products_facets_test"
+path = "tests/products_facets_test.rs"
+harness = false
+
 [[bin]]
 name = "connection_test"
 path = "src/bin/connection_test.rs"
@@ -50,7 +70,7 @@ path = "src/bin/hybrid_search_test.rs"
 [dependencies]
 postgres = "0.19"
 tokio = { version = "1", features = ["full"] }
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls"] }
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }

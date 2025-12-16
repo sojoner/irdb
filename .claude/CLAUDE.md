@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 IR DB is an AI-enhanced PostgreSQL 17.5 platform with RAG (Retrieval Augmented Generation) capabilities. It combines:
 - **pgvector (v0.8.0)** - Vector similarity search with 1536-dimension embeddings
-- **ParadeDB pg_search (v0.17.2)** - Full-text search with BM25 ranking
+- **ParadeDB pg_search (v0.20.x)** - Full-text search with BM25 ranking
 - **PostgreSQL 17.5** - Latest stable PostgreSQL with custom optimizations
 
 **Key Features:**
@@ -174,7 +174,7 @@ The Dockerfile uses a two-stage build pattern:
 
 1. **Builder Stage** (`postgres:17.5-bookworm AS builder`)
    - Installs Rust toolchain
-   - Compiles ParadeDB pg_search extension from source (v0.17.2)
+   - Compiles ParadeDB pg_search extension from source (v0.20.x)
    - Uses cargo-pgrx (v0.15.0) for PostgreSQL extension building
    - Only pg_search is built (not pg_analytics)
 
