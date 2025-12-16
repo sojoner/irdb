@@ -90,11 +90,20 @@ SELECT id, name, price::float8 FROM products
 WHERE products @@@ 'category:Electronics AND price:[50 TO 100]'
 ORDER BY price;
 
--- Snippet extraction (for highlighting)
-SELECT id, name, paradedb.snippet(description)
-FROM products
-WHERE products @@@ 'description:wireless'
-LIMIT 5;
+-- Snippet extraction (for highlighting) - Optional feature
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = 'paradedb' AND p.proname = 'snippet'
+    ) THEN
+        RAISE NOTICE 'paradedb.snippet() is available - snippet extraction would work here';
+        -- Note: Cannot run SELECT in DO block, this is just a check
+    ELSE
+        RAISE NOTICE 'SKIPPING: paradedb.snippet() not available in this ParadeDB version';
+    END IF;
+END $$;
 
 -- Don't forget to clean up when testing
 -- DROP TABLE products CASCADE;

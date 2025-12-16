@@ -1,8 +1,36 @@
 -- 10_bm25_search_tests.sql
 -- BM25 full-text search validation tests
--- ParadeDB pg_search v0.20+ operators: ||| (disjunction), &&& (conjunction), === (exact)
+-- ParadeDB pg_search v0.20+ operators: ||| (disjunction), &&& (conjunction)
+--
+-- This test file is IDEMPOTENT and SELF-CONTAINED
+-- It sets up its own test data and cleans up after itself
+--
+-- Usage:
+--   psql -h localhost -U postgres -d database -f 10_bm25_search_tests.sql
 
-\echo '=== BM25 Search Tests ==='
+\echo '=============================================='
+\echo '=== BM25 Search Tests (Self-Contained) ==='
+\echo '=============================================='
+
+--------------------------------------------------------------------------------
+-- SETUP: Initialize test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- SETUP: Loading test utilities and data ---'
+
+-- Load the test utilities (creates functions if not exist)
+\i test_utils.sql
+
+-- Run setup to create schema and load data
+SELECT * FROM test_utils.setup();
+
+\echo ''
+\echo '--- SETUP COMPLETE ---'
+\echo ''
+
+--------------------------------------------------------------------------------
+-- TEST SUITE: BM25 Full-Text Search
+--------------------------------------------------------------------------------
 
 -- Test 1: Match Disjunction (|||) - Match ANY token
 \echo 'Test 1: BM25 Disjunction - Search for "wireless headphones"'
@@ -13,7 +41,7 @@ SELECT
     price,
     rating,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless headphones'
 ORDER BY pdb.score(id) DESC
 LIMIT 10;
@@ -26,7 +54,7 @@ SELECT
     brand,
     price,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description &&& 'wireless noise cancellation'
 ORDER BY pdb.score(id) DESC
 LIMIT 10;
@@ -40,7 +68,7 @@ SELECT
     category,
     price,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE name ||| 'keyboard'
 ORDER BY pdb.score(id) DESC
 LIMIT 5;
@@ -54,7 +82,7 @@ SELECT
     price,
     rating,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'headphones'
   AND price BETWEEN 50 AND 150
   AND in_stock = true
@@ -70,7 +98,7 @@ SELECT
     price,
     rating,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless'
   AND rating >= 4.5
 ORDER BY pdb.score(id) DESC
@@ -86,7 +114,7 @@ SELECT
     subcategory,
     price,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'gaming'
   AND category = 'Electronics'
 ORDER BY pdb.score(id) DESC
@@ -102,7 +130,7 @@ SELECT
     price,
     rating,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE brand ||| 'Sony'
 ORDER BY pdb.score(id) DESC
 LIMIT 5;
@@ -117,7 +145,7 @@ SELECT
     rating,
     review_count,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description &&& 'professional camera'
   AND price >= 500
   AND rating >= 4.5
@@ -134,7 +162,7 @@ SELECT
     price,
     rating,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless bluetooth'
   AND price < 30
 ORDER BY pdb.score(id) DESC
@@ -150,7 +178,7 @@ SELECT
     rating,
     review_count,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'premium professional'
   AND rating > 4.8
   AND price > 200
@@ -167,7 +195,7 @@ SELECT
     rating,
     review_count,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless'
   AND review_count > 10000
 ORDER BY review_count DESC
@@ -182,7 +210,7 @@ SELECT
     stock_quantity,
     in_stock,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'ergonomic'
   AND in_stock = true
   AND stock_quantity > 0
@@ -199,7 +227,7 @@ SELECT
     rating,
     featured,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'camera'
   AND featured = true
 ORDER BY pdb.score(id) DESC
@@ -215,7 +243,7 @@ SELECT
     subcategory,
     price,
     pdb.score(id) AS bm25_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'fitness training'
   AND category = 'Sports'
 ORDER BY pdb.score(id) DESC
@@ -231,18 +259,29 @@ SELECT
     rating,
     pdb.score(id) AS bm25_score,
     (pdb.score(id) * 0.7 + (5.0 - price / 200.0) * 0.3) AS combined_score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'office chair ergonomic'
 ORDER BY combined_score DESC
 LIMIT 5;
 
--- Performance check: Show query plan for BM25 search
+-- Test 16: Performance check - Show query plan for BM25 search
 \echo 'Test 16: EXPLAIN ANALYZE - BM25 index usage'
 EXPLAIN ANALYZE
 SELECT id, name, pdb.score(id) AS score
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless bluetooth'
 ORDER BY pdb.score(id) DESC
 LIMIT 10;
 
+--------------------------------------------------------------------------------
+-- TEARDOWN: Clean up test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- TEARDOWN: Cleaning up test data ---'
+
+SELECT * FROM test_utils.teardown();
+
+\echo ''
+\echo '=============================================='
 \echo '=== BM25 Tests Complete ==='
+\echo '=============================================='

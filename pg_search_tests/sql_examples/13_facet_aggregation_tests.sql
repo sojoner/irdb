@@ -1,8 +1,36 @@
 -- 13_facet_aggregation_tests.sql
 -- Faceted search and aggregation tests using ParadeDB pdb.agg()
 -- Enables filtering and analytics on search results
+--
+-- This test file is IDEMPOTENT and SELF-CONTAINED
+-- It sets up its own test data and cleans up after itself
+--
+-- Usage:
+--   psql -h localhost -U postgres -d database -f 13_facet_aggregation_tests.sql
 
-\echo '=== Facet Aggregation Tests ==='
+\echo '=============================================='
+\echo '=== Facet Aggregation Tests (Self-Contained) ==='
+\echo '=============================================='
+
+--------------------------------------------------------------------------------
+-- SETUP: Initialize test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- SETUP: Loading test utilities and data ---'
+
+-- Load the test utilities (creates functions if not exist)
+\i test_utils.sql
+
+-- Run setup to create schema and load data
+SELECT * FROM test_utils.setup();
+
+\echo ''
+\echo '--- SETUP COMPLETE ---'
+\echo ''
+
+--------------------------------------------------------------------------------
+-- TEST SUITE: Faceted Search and Aggregations
+--------------------------------------------------------------------------------
 
 -- Test 1: Value Count - Total Results
 \echo 'Test 1: Value Count - Total results for "wireless" search'
@@ -13,7 +41,7 @@ SELECT
     price,
     pdb.score(id) AS score,
     pdb.agg('{"value_count": {"field": "id"}}') OVER () AS total_count
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless'
 ORDER BY score DESC
 LIMIT 10;
@@ -25,7 +53,7 @@ SELECT
     COUNT(*) AS count,
     AVG(price) AS avg_price,
     AVG(rating) AS avg_rating
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless'
 GROUP BY category
 ORDER BY count DESC;
@@ -37,7 +65,7 @@ SELECT
     name,
     price,
     pdb.agg('{"histogram": {"field": "price", "interval": 50}}') OVER () AS price_histogram
-FROM products.items
+FROM test_products.items
 WHERE category = 'Electronics'
 ORDER BY pdb.score(id) DESC
 LIMIT 10;
@@ -49,7 +77,7 @@ SELECT
     pdb.agg('{"avg": {"field": "rating"}}') AS avg_rating,
     pdb.agg('{"value_count": {"field": "id"}}') AS total_products,
     pdb.agg('{"sum": {"field": "review_count"}}') AS total_reviews
-FROM products.items
+FROM test_products.items
 WHERE category = 'Electronics';
 
 -- Test 5: Price Range Facets
@@ -65,7 +93,7 @@ SELECT
     AVG(rating) AS avg_rating,
     MIN(price) AS min_price,
     MAX(price) AS max_price
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless bluetooth'
 GROUP BY price_range
 ORDER BY MIN(price);
@@ -82,7 +110,7 @@ SELECT
     COUNT(*) AS count,
     AVG(price) AS avg_price,
     AVG(review_count) AS avg_reviews
-FROM products.items
+FROM test_products.items
 WHERE in_stock = true
 GROUP BY rating_category
 ORDER BY MIN(rating) DESC;
@@ -95,11 +123,12 @@ SELECT
     AVG(price)::DECIMAL(10,2) AS avg_price,
     AVG(rating)::DECIMAL(3,1) AS avg_rating,
     SUM(review_count) AS total_reviews
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless'
 GROUP BY brand
-HAVING COUNT(*) >= 2
-ORDER BY product_count DESC;
+HAVING COUNT(*) >= 1
+ORDER BY product_count DESC
+LIMIT 10;
 
 -- Test 8: Subcategory Facets within Category
 \echo 'Test 8: Subcategory Facets - Electronics subcategories'
@@ -110,7 +139,7 @@ SELECT
     AVG(price)::DECIMAL(10,2) AS avg_price,
     MIN(price) AS min_price,
     MAX(price) AS max_price
-FROM products.items
+FROM test_products.items
 WHERE category = 'Electronics'
 GROUP BY category, subcategory
 ORDER BY count DESC;
@@ -122,7 +151,7 @@ SELECT
     COUNT(*) AS count,
     AVG(price)::DECIMAL(10,2) AS avg_price,
     SUM(stock_quantity) AS total_stock
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'headphones keyboard mouse'
 GROUP BY in_stock
 ORDER BY in_stock DESC;
@@ -134,7 +163,7 @@ SELECT
     COUNT(*) AS count,
     AVG(price)::DECIMAL(10,2) AS avg_price,
     AVG(rating)::DECIMAL(3,1) AS avg_rating
-FROM products.items
+FROM test_products.items
 WHERE category = 'Electronics'
 GROUP BY featured
 ORDER BY featured DESC;
@@ -151,7 +180,7 @@ SELECT
     COUNT(*) AS count,
     AVG(rating)::DECIMAL(3,1) AS avg_rating,
     AVG(price)::DECIMAL(10,2) AS avg_price
-FROM products.items
+FROM test_products.items
 GROUP BY popularity
 ORDER BY MIN(review_count) DESC;
 
@@ -167,7 +196,7 @@ SELECT
     END AS price_range,
     COUNT(*) AS count,
     AVG(rating)::DECIMAL(3,1) AS avg_rating
-FROM products.items
+FROM test_products.items
 WHERE in_stock = true
 GROUP BY category, price_range
 ORDER BY category, MIN(price);
@@ -182,7 +211,7 @@ SELECT
     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price) AS median_price,
     MAX(price) AS max_price,
     STDDEV(price)::DECIMAL(10,2) AS price_stddev
-FROM products.items
+FROM test_products.items
 GROUP BY category
 ORDER BY avg_price DESC;
 
@@ -192,7 +221,7 @@ SELECT
     attributes->>'color' AS color,
     COUNT(*) AS count,
     AVG(price)::DECIMAL(10,2) AS avg_price
-FROM products.items
+FROM test_products.items
 WHERE attributes ? 'color'
   AND category = 'Electronics'
 GROUP BY attributes->>'color'
@@ -209,7 +238,7 @@ WITH wireless_products AS (
         price,
         rating,
         in_stock
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'wireless'
 )
 SELECT
@@ -239,7 +268,7 @@ SELECT
     END AS time_period,
     COUNT(*) AS count,
     AVG(rating)::DECIMAL(3,1) AS avg_rating
-FROM products.items
+FROM test_products.items
 GROUP BY time_period
 ORDER BY MIN(created_at) DESC;
 
@@ -255,7 +284,7 @@ SELECT
     END AS stock_level,
     COUNT(*) AS count,
     SUM(stock_quantity) AS total_units
-FROM products.items
+FROM test_products.items
 GROUP BY stock_level
 ORDER BY MIN(stock_quantity);
 
@@ -269,7 +298,7 @@ WITH search_results AS (
         price,
         rating,
         pdb.score(id) AS score
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'wireless bluetooth'
     ORDER BY pdb.score(id) DESC
 ),
@@ -303,7 +332,7 @@ SELECT
     COUNT(*) AS count,
     AVG(rating)::DECIMAL(3,1) AS avg_rating,
     SUM(stock_quantity) AS total_stock
-FROM products.items
+FROM test_products.items
 WHERE in_stock = true
 GROUP BY ROLLUP(category, subcategory, price_bucket)
 ORDER BY category NULLS LAST, subcategory NULLS LAST, price_bucket NULLS LAST;
@@ -316,9 +345,20 @@ SELECT
     COUNT(*) AS count,
     AVG(price) AS avg_price,
     AVG(rating) AS avg_rating
-FROM products.items
+FROM test_products.items
 WHERE description ||| 'wireless'
 GROUP BY category
 ORDER BY count DESC;
 
+--------------------------------------------------------------------------------
+-- TEARDOWN: Clean up test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- TEARDOWN: Cleaning up test data ---'
+
+SELECT * FROM test_utils.teardown();
+
+\echo ''
+\echo '=============================================='
 \echo '=== Facet Aggregation Tests Complete ==='
+\echo '=============================================='

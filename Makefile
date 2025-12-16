@@ -43,6 +43,9 @@ help: ## Show this help message
 	@echo '$(YELLOW)Validation & Testing:$(NC)'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E 'validate-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2}'
 	@echo ''
+	@echo '$(YELLOW)SQL Test Scripts:$(NC)'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E 'test-sql-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2}'
+	@echo ''
 	@echo '$(YELLOW)Access & Connectivity:$(NC)'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(port-forward|connect|logs)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2}'
 	@echo ''
@@ -418,6 +421,116 @@ validate-hybrid: verify-db ## Test hybrid search (vector + BM25)
 .PHONY: validate-all
 validate-all: validate-extensions validate-bm25 validate-vector validate-hybrid ## Run all validation tests
 	@echo "$(GREEN)✓ All validation tests passed!$(NC)"
+
+# SQL Test Scripts (pg_search_tests) - Using DATABASE_URL environment variable
+SQL_TESTS_DIR := pg_search_tests/sql_examples
+PSQL_OPTS := --pset=pager=off -v ON_ERROR_STOP=1
+
+.PHONY: test-sql-setup
+test-sql-setup: ## Run 00_setup_extensions.sql
+	@echo "$(CYAN)Running setup extensions test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "$(RED)✗ DATABASE_URL not set$(NC)"; \
+		echo "$(YELLOW)Set it with: export DATABASE_URL=postgres://user:password@host:port/database$(NC)"; \
+		exit 1; \
+	fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/00_setup_extensions.sql
+	@echo "$(GREEN)✓ Setup extensions test passed$(NC)"
+
+.PHONY: test-sql-fuzzy
+test-sql-fuzzy: ## Run 01_fuzzy_search.sql
+	@echo "$(CYAN)Running fuzzy search test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/01_fuzzy_search.sql
+	@echo "$(GREEN)✓ Fuzzy search test passed$(NC)"
+
+.PHONY: test-sql-exact
+test-sql-exact: ## Run 02_exact_term_search.sql
+	@echo "$(CYAN)Running exact term search test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/02_exact_term_search.sql
+	@echo "$(GREEN)✓ Exact term search test passed$(NC)"
+
+.PHONY: test-sql-boolean
+test-sql-boolean: ## Run 03_boolean_search.sql
+	@echo "$(CYAN)Running boolean search test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/03_boolean_search.sql
+	@echo "$(GREEN)✓ Boolean search test passed$(NC)"
+
+.PHONY: test-sql-phrase
+test-sql-phrase: ## Run 04_phrase_search.sql
+	@echo "$(CYAN)Running phrase search test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/04_phrase_search.sql
+	@echo "$(GREEN)✓ Phrase search test passed$(NC)"
+
+.PHONY: test-sql-complete-setup
+test-sql-complete-setup: ## Run 05_complete_setup.sql
+	@echo "$(CYAN)Running complete setup test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/05_complete_setup.sql
+	@echo "$(GREEN)✓ Complete setup test passed$(NC)"
+
+.PHONY: test-sql-numeric
+test-sql-numeric: ## Run 06_numeric_range_search.sql
+	@echo "$(CYAN)Running numeric range search test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/06_numeric_range_search.sql
+	@echo "$(GREEN)✓ Numeric range search test passed$(NC)"
+
+.PHONY: test-sql-snippet
+test-sql-snippet: ## Run 07_snippet_highlighting.sql
+	@echo "$(CYAN)Running snippet highlighting test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/07_snippet_highlighting.sql
+	@echo "$(GREEN)✓ Snippet highlighting test passed$(NC)"
+
+.PHONY: test-sql-products-schema
+test-sql-products-schema: ## Run 08_products_schema.sql
+	@echo "$(CYAN)Running products schema test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/08_products_schema.sql
+	@echo "$(GREEN)✓ Products schema test passed$(NC)"
+
+.PHONY: test-sql-products-data
+test-sql-products-data: ## Run 09_products_data.sql
+	@echo "$(CYAN)Running products data test...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@psql "$$DATABASE_URL" $(PSQL_OPTS) -f $(SQL_TESTS_DIR)/09_products_data.sql
+	@echo "$(GREEN)✓ Products data test passed$(NC)"
+
+.PHONY: test-sql-bm25
+test-sql-bm25: ## Run 10_bm25_search_tests.sql
+	@echo "$(CYAN)Running BM25 search tests...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@cd $(SQL_TESTS_DIR) && psql "$$DATABASE_URL" $(PSQL_OPTS) -f 10_bm25_search_tests.sql
+	@echo "$(GREEN)✓ BM25 search tests passed$(NC)"
+
+.PHONY: test-sql-vector
+test-sql-vector: ## Run 11_vector_search_tests.sql
+	@echo "$(CYAN)Running vector search tests...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@cd $(SQL_TESTS_DIR) && psql "$$DATABASE_URL" $(PSQL_OPTS) -f 11_vector_search_tests.sql
+	@echo "$(GREEN)✓ Vector search tests passed$(NC)"
+
+.PHONY: test-sql-hybrid
+test-sql-hybrid: ## Run 12_hybrid_search_tests.sql
+	@echo "$(CYAN)Running hybrid search tests...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@cd $(SQL_TESTS_DIR) && psql "$$DATABASE_URL" $(PSQL_OPTS) -f 12_hybrid_search_tests.sql
+	@echo "$(GREEN)✓ Hybrid search tests passed$(NC)"
+
+.PHONY: test-sql-facets
+test-sql-facets: ## Run 13_facet_aggregation_tests.sql
+	@echo "$(CYAN)Running facet aggregation tests...$(NC)"
+	@if [ -z "$$DATABASE_URL" ]; then echo "$(RED)✗ DATABASE_URL not set$(NC)"; exit 1; fi
+	@cd $(SQL_TESTS_DIR) && psql "$$DATABASE_URL" $(PSQL_OPTS) -f 13_facet_aggregation_tests.sql
+	@echo "$(GREEN)✓ Facet aggregation tests passed$(NC)"
+
+.PHONY: test-sql-all
+test-sql-all: test-sql-setup test-sql-fuzzy test-sql-exact test-sql-boolean test-sql-phrase test-sql-complete-setup test-sql-numeric test-sql-snippet test-sql-products-schema test-sql-products-data test-sql-bm25 test-sql-vector test-sql-hybrid test-sql-facets ## Run all SQL test scripts
+	@echo "$(GREEN)✓✓✓ All SQL test scripts passed! ✓✓✓$(NC)"
 
 ##@ Access & Connectivity
 

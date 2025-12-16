@@ -8,11 +8,9 @@
 use anyhow::Result;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
+use uuid::Uuid;
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    println!("\n=== Products Hybrid Search Tests ===\n");
-
+async fn setup_db() -> Result<PgPool> {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL environment variable must be set");
 
@@ -20,8 +18,6 @@ async fn main() -> Result<()> {
         .max_connections(5)
         .connect(&database_url)
         .await?;
-
-    println!("✓ Connected to database");
 
     // Check extensions
     let pg_search_check: (bool,) = sqlx::query_as(
@@ -37,71 +33,55 @@ async fn main() -> Result<()> {
     .await?;
 
     if !pg_search_check.0 {
-        println!("✗ pg_search extension is NOT installed");
-        return Ok(());
+        anyhow::bail!("pg_search extension is NOT installed");
     }
     if !pgvector_check.0 {
-        println!("✗ pgvector extension is NOT installed");
-        return Ok(());
+        anyhow::bail!("pgvector extension is NOT installed");
     }
-    println!("✓ Both pg_search and pgvector extensions are installed");
 
-    // Setup test embeddings
-    setup_test_embeddings(&pool).await?;
-
-    // Run test suite
-    test_hybrid_weighted_combination(&pool).await?;
-    test_hybrid_rrf_fusion(&pool).await?;
-    test_hybrid_with_price_filter(&pool).await?;
-    test_hybrid_with_category_filter(&pool).await?;
-    test_hybrid_balanced_weights(&pool).await?;
-    test_hybrid_with_stock_filter(&pool).await?;
-    test_hybrid_rrf_different_k(&pool).await?;
-    test_hybrid_score_distribution(&pool).await?;
-
-    println!("\n✓ All hybrid search tests passed!");
-    Ok(())
+    Ok(pool)
 }
 
-/// Setup test query embeddings
-async fn setup_test_embeddings(pool: &PgPool) -> Result<()> {
-    println!("Setting up test embeddings...");
-
-    // Drop and recreate table (not TEMP due to connection pooling)
-    let _ = sqlx::query("DROP TABLE IF EXISTS test_embeddings CASCADE")
-        .execute(pool)
-        .await;
-
-    sqlx::query(r#"
-        CREATE TABLE test_embeddings (
+async fn setup_test_embeddings(pool: &PgPool, table_name: &str) -> Result<()> {
+    // Create table
+    let create_sql = format!(r#"
+        CREATE TABLE {} (
             query_name TEXT PRIMARY KEY,
             embedding vector(1536)
         )
-    "#)
-    .execute(pool)
-    .await?;
+    "#, table_name);
+    sqlx::query(&create_sql).execute(pool).await?;
 
-    sqlx::query(r#"
-        INSERT INTO test_embeddings (query_name, embedding)
+    let insert_sql = format!(r#"
+        INSERT INTO {} (query_name, embedding)
         VALUES
             ('wireless_headphones', products.generate_random_embedding(1536)),
             ('gaming_setup', products.generate_random_embedding(1536)),
             ('professional_photography', products.generate_random_embedding(1536)),
             ('home_office', products.generate_random_embedding(1536)),
             ('fitness_gear', products.generate_random_embedding(1536))
-    "#)
-    .execute(pool)
-    .await?;
+    "#, table_name);
+    sqlx::query(&insert_sql).execute(pool).await?;
 
-    println!("✓ Test embeddings created\n");
+    Ok(())
+}
+
+async fn cleanup_test_embeddings(pool: &PgPool, table_name: &str) -> Result<()> {
+    let drop_sql = format!("DROP TABLE IF EXISTS {}", table_name);
+    sqlx::query(&drop_sql).execute(pool).await?;
     Ok(())
 }
 
 /// Test 1: Weighted Score Combination (70% Vector + 30% BM25)
-async fn test_hybrid_weighted_combination(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_weighted_combination() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 1: Hybrid Weighted Combination - 'wireless headphones' (70% vector, 30% BM25)");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_results AS (
             SELECT
                 id,
@@ -114,9 +94,9 @@ async fn test_hybrid_weighted_combination(pool: &PgPool) -> Result<()> {
         vector_results AS (
             SELECT
                 id,
-                1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
+                1 - (description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'wireless_headphones')) AS vector_score
             FROM products.items
-            ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
+            ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'wireless_headphones')
             LIMIT 50
         )
         SELECT
@@ -132,9 +112,9 @@ async fn test_hybrid_weighted_combination(pool: &PgPool) -> Result<()> {
         JOIN products.items p ON p.id = COALESCE(b.id, v.id)
         ORDER BY combined_score DESC
         LIMIT 10
-    "#;
+    "#, table_name, table_name);
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     assert!(!rows.is_empty(), "Should return hybrid results");
 
@@ -153,14 +133,21 @@ async fn test_hybrid_weighted_combination(pool: &PgPool) -> Result<()> {
     assert!(scores.windows(2).all(|w| w[0] >= w[1]), "Combined scores should be descending");
 
     println!("  ✓ Weighted combination works correctly\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }
 
 /// Test 2: Reciprocal Rank Fusion (RRF)
-async fn test_hybrid_rrf_fusion(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_rrf_fusion() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 2: Hybrid RRF - 'gaming peripherals' (k=60)");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_ranked AS (
             SELECT
                 id,
@@ -172,7 +159,7 @@ async fn test_hybrid_rrf_fusion(pool: &PgPool) -> Result<()> {
         vector_ranked AS (
             SELECT
                 id,
-                ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_setup')) AS rank
+                ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'gaming_setup')) AS rank
             FROM products.items
             LIMIT 50
         )
@@ -189,9 +176,9 @@ async fn test_hybrid_rrf_fusion(pool: &PgPool) -> Result<()> {
         JOIN products.items p ON p.id = COALESCE(b.id, v.id)
         ORDER BY rrf_score DESC
         LIMIT 10
-    "#;
+    "#, table_name);
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -208,14 +195,21 @@ async fn test_hybrid_rrf_fusion(pool: &PgPool) -> Result<()> {
     assert!(scores.windows(2).all(|w| w[0] >= w[1]), "RRF scores should be descending");
 
     println!("  ✓ RRF fusion works correctly\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }
 
 /// Test 3: Hybrid Search with Price Filter
-async fn test_hybrid_with_price_filter(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_with_price_filter() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 3: Hybrid Weighted + Price Filter - 'professional camera' under $1000");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_results AS (
             SELECT
                 id,
@@ -229,10 +223,10 @@ async fn test_hybrid_with_price_filter(pool: &PgPool) -> Result<()> {
         vector_results AS (
             SELECT
                 id,
-                1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_photography')) AS vector_score
+                1 - (description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'professional_photography')) AS vector_score
             FROM products.items
             WHERE price < 1000
-            ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_photography')
+            ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'professional_photography')
             LIMIT 30
         )
         SELECT
@@ -247,9 +241,9 @@ async fn test_hybrid_with_price_filter(pool: &PgPool) -> Result<()> {
         JOIN products.items p ON p.id = COALESCE(b.id, v.id)
         ORDER BY combined_score DESC
         LIMIT 5
-    "#;
+    "#, table_name, table_name);
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -262,14 +256,21 @@ async fn test_hybrid_with_price_filter(pool: &PgPool) -> Result<()> {
     }
 
     println!("  ✓ Price filter with hybrid search works correctly\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }
 
 /// Test 4: Hybrid Search with Category and Rating Filters
-async fn test_hybrid_with_category_filter(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_with_category_filter() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 4: Hybrid RRF + Filters - 'office ergonomic', rating >= 4.5");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_ranked AS (
             SELECT
                 id,
@@ -282,7 +283,7 @@ async fn test_hybrid_with_category_filter(pool: &PgPool) -> Result<()> {
         vector_ranked AS (
             SELECT
                 id,
-                ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'home_office')) AS rank
+                ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'home_office')) AS rank
             FROM products.items
             WHERE rating >= 4.5
             LIMIT 30
@@ -297,9 +298,9 @@ async fn test_hybrid_with_category_filter(pool: &PgPool) -> Result<()> {
         JOIN products.items p ON p.id = COALESCE(b.id, v.id)
         ORDER BY rrf_score DESC
         LIMIT 5
-    "#;
+    "#, table_name);
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -312,14 +313,21 @@ async fn test_hybrid_with_category_filter(pool: &PgPool) -> Result<()> {
     }
 
     println!("  ✓ Category and rating filters work correctly\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }
 
 /// Test 5: Balanced Weight Hybrid Search (50-50 split)
-async fn test_hybrid_balanced_weights(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_balanced_weights() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 5: Hybrid Balanced - 'fitness training' (50% vector, 50% BM25)");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_results AS (
             SELECT
                 id,
@@ -332,9 +340,9 @@ async fn test_hybrid_balanced_weights(pool: &PgPool) -> Result<()> {
         vector_results AS (
             SELECT
                 id,
-                1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'fitness_gear')) AS vector_score
+                1 - (description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'fitness_gear')) AS vector_score
             FROM products.items
-            ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'fitness_gear')
+            ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'fitness_gear')
             LIMIT 40
         )
         SELECT
@@ -349,9 +357,9 @@ async fn test_hybrid_balanced_weights(pool: &PgPool) -> Result<()> {
         JOIN products.items p ON p.id = COALESCE(b.id, v.id)
         ORDER BY combined_score DESC
         LIMIT 10
-    "#;
+    "#, table_name, table_name);
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -368,14 +376,21 @@ async fn test_hybrid_balanced_weights(pool: &PgPool) -> Result<()> {
     }
 
     println!("  ✓ Balanced weights work correctly\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }
 
 /// Test 6: Hybrid Search with Stock Filter
-async fn test_hybrid_with_stock_filter(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_with_stock_filter() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 6: Hybrid Weighted - 'wireless bluetooth' in stock only");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_results AS (
             SELECT
                 id,
@@ -390,11 +405,11 @@ async fn test_hybrid_with_stock_filter(pool: &PgPool) -> Result<()> {
         vector_results AS (
             SELECT
                 id,
-                1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
+                1 - (description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'wireless_headphones')) AS vector_score
             FROM products.items
             WHERE in_stock = true
               AND stock_quantity > 0
-            ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
+            ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'wireless_headphones')
             LIMIT 50
         )
         SELECT
@@ -407,9 +422,9 @@ async fn test_hybrid_with_stock_filter(pool: &PgPool) -> Result<()> {
         JOIN products.items p ON p.id = COALESCE(b.id, v.id)
         ORDER BY combined_score DESC
         LIMIT 10
-    "#;
+    "#, table_name, table_name);
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -421,14 +436,21 @@ async fn test_hybrid_with_stock_filter(pool: &PgPool) -> Result<()> {
     }
 
     println!("  ✓ Stock filter works correctly\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }
 
 /// Test 7: RRF with Different K Values
-async fn test_hybrid_rrf_different_k(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_rrf_different_k() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 7: Hybrid RRF Comparison - k=30 vs k=60");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_ranked AS (
             SELECT id, ROW_NUMBER() OVER (ORDER BY pdb.score(id) DESC) AS rank
             FROM products.items
@@ -436,7 +458,7 @@ async fn test_hybrid_rrf_different_k(pool: &PgPool) -> Result<()> {
             LIMIT 30
         ),
         vector_ranked AS (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_setup')) AS rank
+            SELECT id, ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'gaming_setup')) AS rank
             FROM products.items
             LIMIT 30
         )
@@ -450,9 +472,9 @@ async fn test_hybrid_rrf_different_k(pool: &PgPool) -> Result<()> {
         JOIN products.items p ON p.id = COALESCE(b.id, v.id)
         ORDER BY rrf_k60 DESC
         LIMIT 5
-    "#;
+    "#, table_name);
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -463,14 +485,21 @@ async fn test_hybrid_rrf_different_k(pool: &PgPool) -> Result<()> {
     }
 
     println!("  ✓ Different k values tested\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }
 
 /// Test 8: Score Distribution Analysis
-async fn test_hybrid_score_distribution(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_hybrid_score_distribution() -> Result<()> {
+    let pool = setup_db().await?;
+    let table_name = format!("test_embeddings_{}", Uuid::new_v4().simple());
+    setup_test_embeddings(&pool, &table_name).await?;
+
     println!("Test 8: Hybrid Score Distribution Analysis");
 
-    let query = r#"
+    let query = format!(r#"
         WITH bm25_results AS (
             SELECT id, pdb.score(id) AS bm25_score
             FROM products.items
@@ -479,9 +508,9 @@ async fn test_hybrid_score_distribution(pool: &PgPool) -> Result<()> {
             LIMIT 50
         ),
         vector_results AS (
-            SELECT id, 1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
+            SELECT id, 1 - (description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'wireless_headphones')) AS vector_score
             FROM products.items
-            ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
+            ORDER BY description_embedding <=> (SELECT embedding FROM {} WHERE query_name = 'wireless_headphones')
             LIMIT 50
         ),
         combined AS (
@@ -502,9 +531,9 @@ async fn test_hybrid_score_distribution(pool: &PgPool) -> Result<()> {
             MAX(vector_score)::FLOAT AS max_vector,
             MAX(combined_score)::FLOAT AS max_combined
         FROM combined
-    "#;
+    "#, table_name, table_name);
 
-    let row = sqlx::query(query).fetch_one(pool).await?;
+    let row = sqlx::query(&query).fetch_one(&pool).await?;
 
     let total: i32 = row.get("total_results");
     let avg_bm25: f64 = row.get("avg_bm25");
@@ -519,5 +548,7 @@ async fn test_hybrid_score_distribution(pool: &PgPool) -> Result<()> {
     assert!(total > 0, "Should have results");
 
     println!("  ✓ Score distribution analyzed\n");
+    
+    cleanup_test_embeddings(&pool, &table_name).await?;
     Ok(())
 }

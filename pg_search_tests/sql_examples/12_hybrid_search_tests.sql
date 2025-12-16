@@ -1,25 +1,39 @@
 -- 12_hybrid_search_tests.sql
 -- Hybrid search combining BM25 (lexical) and vector (semantic) search
 -- Two approaches: Weighted Score Combination and Reciprocal Rank Fusion (RRF)
+--
+-- This test file is IDEMPOTENT and SELF-CONTAINED
+-- It sets up its own test data and cleans up after itself
+--
+-- Usage:
+--   psql -h localhost -U postgres -d database -f 12_hybrid_search_tests.sql
 
-\echo '=== Hybrid Search Tests ==='
+\echo '=============================================='
+\echo '=== Hybrid Search Tests (Self-Contained) ==='
+\echo '=============================================='
 
--- Ensure test embeddings exist
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'pg_temp' AND tablename LIKE 'test_embeddings%') THEN
-        CREATE TEMP TABLE test_embeddings (
-            query_name TEXT PRIMARY KEY,
-            embedding vector(1536)
-        );
-        INSERT INTO test_embeddings (query_name, embedding) VALUES
-        ('wireless_headphones', products.generate_random_embedding(1536)),
-        ('gaming_setup', products.generate_random_embedding(1536)),
-        ('professional_photography', products.generate_random_embedding(1536)),
-        ('home_office', products.generate_random_embedding(1536)),
-        ('fitness_gear', products.generate_random_embedding(1536));
-    END IF;
-END $$;
+--------------------------------------------------------------------------------
+-- SETUP: Initialize test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- SETUP: Loading test utilities and data ---'
+
+-- Load the test utilities (creates functions if not exist)
+\i test_utils.sql
+
+-- Run setup to create schema and load data
+SELECT * FROM test_utils.setup();
+
+-- Create test query embeddings
+SELECT * FROM test_utils.create_test_embeddings();
+
+\echo ''
+\echo '--- SETUP COMPLETE ---'
+\echo ''
+
+--------------------------------------------------------------------------------
+-- TEST SUITE: Hybrid Search (BM25 + Vector)
+--------------------------------------------------------------------------------
 
 -- Test 1: Weighted Score Combination (70% Vector + 30% BM25)
 \echo 'Test 1: Hybrid Weighted - "wireless headphones" (70% vector, 30% BM25)'
@@ -27,7 +41,7 @@ WITH bm25_results AS (
     SELECT
         id,
         pdb.score(id) AS bm25_score
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'wireless headphones'
     ORDER BY pdb.score(id) DESC
     LIMIT 50
@@ -36,7 +50,7 @@ vector_results AS (
     SELECT
         id,
         1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
-    FROM products.items
+    FROM test_products.items
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
     LIMIT 50
 )
@@ -51,7 +65,7 @@ SELECT
     (COALESCE(b.bm25_score, 0) * 0.3 + COALESCE(v.vector_score, 0) * 0.7) AS combined_score
 FROM bm25_results b
 FULL OUTER JOIN vector_results v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY combined_score DESC
 LIMIT 10;
 
@@ -61,7 +75,7 @@ WITH bm25_ranked AS (
     SELECT
         id,
         ROW_NUMBER() OVER (ORDER BY pdb.score(id) DESC) AS rank
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'gaming peripherals mouse keyboard'
     LIMIT 50
 ),
@@ -69,7 +83,7 @@ vector_ranked AS (
     SELECT
         id,
         ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_setup')) AS rank
-    FROM products.items
+    FROM test_products.items
     LIMIT 50
 )
 SELECT
@@ -84,7 +98,7 @@ SELECT
     (1.0 / (60 + COALESCE(b.rank, 1000)) + 1.0 / (60 + COALESCE(v.rank, 1000))) AS rrf_score
 FROM bm25_ranked b
 FULL OUTER JOIN vector_ranked v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY rrf_score DESC
 LIMIT 10;
 
@@ -94,7 +108,7 @@ WITH bm25_results AS (
     SELECT
         id,
         pdb.score(id) AS bm25_score
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'professional camera photography'
       AND price < 1000
     ORDER BY pdb.score(id) DESC
@@ -104,7 +118,7 @@ vector_results AS (
     SELECT
         id,
         1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_photography')) AS vector_score
-    FROM products.items
+    FROM test_products.items
     WHERE price < 1000
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_photography')
     LIMIT 30
@@ -120,7 +134,7 @@ SELECT
     (COALESCE(b.bm25_score, 0) * 0.4 + COALESCE(v.vector_score, 0) * 0.6) AS combined_score
 FROM bm25_results b
 FULL OUTER JOIN vector_results v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY combined_score DESC
 LIMIT 5;
 
@@ -130,7 +144,7 @@ WITH bm25_ranked AS (
     SELECT
         id,
         ROW_NUMBER() OVER (ORDER BY pdb.score(id) DESC) AS rank
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'office ergonomic comfortable'
       AND category = 'Home & Garden'
       AND rating >= 4.5
@@ -140,7 +154,7 @@ vector_ranked AS (
     SELECT
         id,
         ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'home_office')) AS rank
-    FROM products.items
+    FROM test_products.items
     WHERE category = 'Home & Garden'
       AND rating >= 4.5
     LIMIT 30
@@ -156,7 +170,7 @@ SELECT
     (1.0 / (60 + COALESCE(b.rank, 1000)) + 1.0 / (60 + COALESCE(v.rank, 1000))) AS rrf_score
 FROM bm25_ranked b
 FULL OUTER JOIN vector_ranked v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY rrf_score DESC
 LIMIT 5;
 
@@ -166,7 +180,7 @@ WITH bm25_results AS (
     SELECT
         id,
         pdb.score(id) AS bm25_score
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'fitness training workout exercise'
     ORDER BY pdb.score(id) DESC
     LIMIT 40
@@ -175,7 +189,7 @@ vector_results AS (
     SELECT
         id,
         1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'fitness_gear')) AS vector_score
-    FROM products.items
+    FROM test_products.items
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'fitness_gear')
     LIMIT 40
 )
@@ -190,7 +204,7 @@ SELECT
     (COALESCE(b.bm25_score, 0) * 0.5 + COALESCE(v.vector_score, 0) * 0.5) AS combined_score
 FROM bm25_results b
 FULL OUTER JOIN vector_results v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY combined_score DESC
 LIMIT 10;
 
@@ -200,7 +214,7 @@ WITH bm25_results AS (
     SELECT
         id,
         pdb.score(id) AS bm25_score
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'wireless bluetooth'
       AND in_stock = true
       AND stock_quantity > 0
@@ -211,7 +225,7 @@ vector_results AS (
     SELECT
         id,
         1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
-    FROM products.items
+    FROM test_products.items
     WHERE in_stock = true
       AND stock_quantity > 0
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
@@ -228,7 +242,7 @@ SELECT
     (COALESCE(b.bm25_score, 0) * 0.3 + COALESCE(v.vector_score, 0) * 0.7) AS combined_score
 FROM bm25_results b
 FULL OUTER JOIN vector_results v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY combined_score DESC
 LIMIT 10;
 
@@ -238,7 +252,7 @@ WITH bm25_results AS (
     SELECT
         id,
         pdb.score(id) AS bm25_score
-    FROM products.items
+    FROM test_products.items
     WHERE (name ||| 'wireless headphones' OR description ||| 'wireless headphones')
     ORDER BY pdb.score(id) DESC
     LIMIT 50
@@ -247,7 +261,7 @@ vector_results AS (
     SELECT
         id,
         1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
-    FROM products.items
+    FROM test_products.items
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
     LIMIT 50
 )
@@ -262,7 +276,7 @@ SELECT
     (COALESCE(b.bm25_score, 0) * 0.3 + COALESCE(v.vector_score, 0) * 0.7) AS combined_score
 FROM bm25_results b
 FULL OUTER JOIN vector_results v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY combined_score DESC
 LIMIT 10;
 
@@ -270,13 +284,13 @@ LIMIT 10;
 \echo 'Test 8: Hybrid RRF Comparison - k=30 vs k=60 for "gaming"'
 WITH bm25_ranked AS (
     SELECT id, ROW_NUMBER() OVER (ORDER BY pdb.score(id) DESC) AS rank
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'gaming professional esports'
     LIMIT 30
 ),
 vector_ranked AS (
     SELECT id, ROW_NUMBER() OVER (ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_setup')) AS rank
-    FROM products.items
+    FROM test_products.items
     LIMIT 30
 )
 SELECT
@@ -287,7 +301,7 @@ SELECT
     (1.0 / (60 + COALESCE(b.rank, 1000)) + 1.0 / (60 + COALESCE(v.rank, 1000))) AS rrf_k60
 FROM bm25_ranked b
 FULL OUTER JOIN vector_ranked v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY rrf_k60 DESC
 LIMIT 10;
 
@@ -295,14 +309,14 @@ LIMIT 10;
 \echo 'Test 9: Hybrid Score Distribution - Analyze BM25 vs Vector contribution'
 WITH bm25_results AS (
     SELECT id, pdb.score(id) AS bm25_score
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'wireless bluetooth'
     ORDER BY pdb.score(id) DESC
     LIMIT 50
 ),
 vector_results AS (
     SELECT id, 1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
-    FROM products.items
+    FROM test_products.items
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
     LIMIT 50
 ),
@@ -330,14 +344,14 @@ FROM combined;
 EXPLAIN ANALYZE
 WITH bm25_results AS (
     SELECT id, pdb.score(id) AS bm25_score
-    FROM products.items
+    FROM test_products.items
     WHERE description ||| 'wireless headphones'
     ORDER BY pdb.score(id) DESC
     LIMIT 50
 ),
 vector_results AS (
     SELECT id, 1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')) AS vector_score
-    FROM products.items
+    FROM test_products.items
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_headphones')
     LIMIT 50
 )
@@ -347,8 +361,19 @@ SELECT
     (COALESCE(b.bm25_score, 0) * 0.3 + COALESCE(v.vector_score, 0) * 0.7) AS combined_score
 FROM bm25_results b
 FULL OUTER JOIN vector_results v ON b.id = v.id
-JOIN products.items p ON p.id = COALESCE(b.id, v.id)
+JOIN test_products.items p ON p.id = COALESCE(b.id, v.id)
 ORDER BY combined_score DESC
 LIMIT 10;
 
+--------------------------------------------------------------------------------
+-- TEARDOWN: Clean up test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- TEARDOWN: Cleaning up test data ---'
+
+SELECT * FROM test_utils.teardown();
+
+\echo ''
+\echo '=============================================='
 \echo '=== Hybrid Search Tests Complete ==='
+\echo '=============================================='

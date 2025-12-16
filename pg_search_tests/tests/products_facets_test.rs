@@ -9,10 +9,7 @@ use anyhow::Result;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    println!("\n=== Products Faceted Search Tests ===\n");
-
+async fn setup_db() -> Result<PgPool> {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL environment variable must be set");
 
@@ -20,8 +17,6 @@ async fn main() -> Result<()> {
         .max_connections(5)
         .connect(&database_url)
         .await?;
-
-    println!("✓ Connected to database");
 
     // Check if pg_search extension is available
     let pg_search_check: (bool,) = sqlx::query_as(
@@ -31,29 +26,16 @@ async fn main() -> Result<()> {
     .await?;
 
     if !pg_search_check.0 {
-        println!("✗ pg_search extension is NOT installed");
-        return Ok(());
+        anyhow::bail!("pg_search extension is NOT installed");
     }
-    println!("✓ pg_search extension is installed");
 
-    // Run test suite
-    test_facet_value_count(&pool).await?;
-    test_facet_category_aggregation(&pool).await?;
-    test_facet_price_ranges(&pool).await?;
-    test_facet_rating_distribution(&pool).await?;
-    test_facet_brand_stats(&pool).await?;
-    test_facet_subcategory_breakdown(&pool).await?;
-    test_facet_stock_availability(&pool).await?;
-    test_facet_combined_filters(&pool).await?;
-    test_facet_price_statistics(&pool).await?;
-    test_facet_multi_dimensional(&pool).await?;
-
-    println!("\n✓ All faceted search tests passed!");
-    Ok(())
+    Ok(pool)
 }
 
 /// Test 1: Value Count Aggregation
-async fn test_facet_value_count(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_value_count() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 1: Value Count - Total results for 'wireless' search");
 
     // Note: pdb.agg() with OVER() requires specific syntax, so we'll use COUNT(*) instead
@@ -63,7 +45,7 @@ async fn test_facet_value_count(pool: &PgPool) -> Result<()> {
         WHERE description ||| 'wireless'
     "#;
 
-    let row = sqlx::query(query).fetch_one(pool).await?;
+    let row = sqlx::query(query).fetch_one(&pool).await?;
     let total_count: i64 = row.get("total_count");
 
     println!("  - Total 'wireless' products: {}", total_count);
@@ -74,7 +56,9 @@ async fn test_facet_value_count(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 2: Category Facets (Terms Aggregation)
-async fn test_facet_category_aggregation(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_category_aggregation() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 2: Category Facets - Count by category for 'wireless'");
 
     let query = r#"
@@ -89,7 +73,7 @@ async fn test_facet_category_aggregation(pool: &PgPool) -> Result<()> {
         ORDER BY count DESC
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     assert!(!rows.is_empty(), "Should have category facets");
 
@@ -108,7 +92,9 @@ async fn test_facet_category_aggregation(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 3: Price Range Facets
-async fn test_facet_price_ranges(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_price_ranges() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 3: Price Range Facets - Budget, Mid, Premium, Luxury");
 
     let query = r#"
@@ -129,7 +115,7 @@ async fn test_facet_price_ranges(pool: &PgPool) -> Result<()> {
         ORDER BY MIN(price)
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let price_range: String = row.get("price_range");
@@ -145,7 +131,9 @@ async fn test_facet_price_ranges(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 4: Rating Distribution
-async fn test_facet_rating_distribution(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_rating_distribution() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 4: Rating Distribution - Group by rating buckets");
 
     let query = r#"
@@ -165,7 +153,7 @@ async fn test_facet_rating_distribution(pool: &PgPool) -> Result<()> {
         ORDER BY MIN(rating) DESC
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let rating_category: String = row.get("rating_category");
@@ -181,7 +169,9 @@ async fn test_facet_rating_distribution(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 5: Brand Facets with Statistics
-async fn test_facet_brand_stats(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_brand_stats() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 5: Brand Facets - Top brands by product count");
 
     let query = r#"
@@ -199,7 +189,7 @@ async fn test_facet_brand_stats(pool: &PgPool) -> Result<()> {
         LIMIT 10
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let brand: String = row.get("brand");
@@ -216,7 +206,9 @@ async fn test_facet_brand_stats(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 6: Subcategory Breakdown within Category
-async fn test_facet_subcategory_breakdown(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_subcategory_breakdown() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 6: Subcategory Facets - Electronics subcategories");
 
     let query = r#"
@@ -233,7 +225,7 @@ async fn test_facet_subcategory_breakdown(pool: &PgPool) -> Result<()> {
         ORDER BY count DESC
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let subcategory: String = row.get("subcategory");
@@ -249,7 +241,9 @@ async fn test_facet_subcategory_breakdown(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 7: Stock Availability Facets
-async fn test_facet_stock_availability(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_stock_availability() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 7: Stock Availability - In stock vs Out of stock");
 
     let query = r#"
@@ -264,7 +258,7 @@ async fn test_facet_stock_availability(pool: &PgPool) -> Result<()> {
         ORDER BY in_stock DESC
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let in_stock: bool = row.get("in_stock");
@@ -281,7 +275,9 @@ async fn test_facet_stock_availability(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 8: Combined Facets - Category + Price Range
-async fn test_facet_combined_filters(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_combined_filters() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 8: Combined Facets - Category and price range breakdown");
 
     let query = r#"
@@ -301,7 +297,7 @@ async fn test_facet_combined_filters(pool: &PgPool) -> Result<()> {
         ORDER BY category, MIN(price)
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     let mut current_category = String::new();
     for row in &rows {
@@ -321,7 +317,9 @@ async fn test_facet_combined_filters(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 9: Price Statistics by Category
-async fn test_facet_price_statistics(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_price_statistics() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 9: Price Statistics - Min, Max, Avg by category");
 
     let query = r#"
@@ -337,7 +335,7 @@ async fn test_facet_price_statistics(pool: &PgPool) -> Result<()> {
         ORDER BY avg_price DESC
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let category: String = row.get("category");
@@ -355,7 +353,9 @@ async fn test_facet_price_statistics(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 10: Multi-Dimensional Facet
-async fn test_facet_multi_dimensional(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_facet_multi_dimensional() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 10: Multi-Dimensional Facet - Category + Brand + Price tier");
 
     let query = r#"
@@ -387,7 +387,7 @@ async fn test_facet_multi_dimensional(pool: &PgPool) -> Result<()> {
         ORDER BY category, brand, price_tier
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     let mut current_category = String::new();
     let mut current_brand = String::new();

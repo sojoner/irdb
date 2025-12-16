@@ -11,8 +11,11 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 \echo '✓ vector extension created'
 
+-- pg_stat_statements is optional (requires superuser)
+\set ON_ERROR_STOP off
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-\echo '✓ pg_stat_statements extension created'
+\echo '✓ pg_stat_statements extension created (or skipped if no permissions)'
+\set ON_ERROR_STOP on
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 \echo '✓ pg_trgm extension created'

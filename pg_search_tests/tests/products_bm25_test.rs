@@ -9,10 +9,7 @@ use anyhow::Result;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    println!("\n=== Products BM25 Search Tests ===\n");
-
+async fn setup_db() -> Result<PgPool> {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL environment variable must be set");
 
@@ -20,8 +17,6 @@ async fn main() -> Result<()> {
         .max_connections(5)
         .connect(&database_url)
         .await?;
-
-    println!("✓ Connected to database");
 
     // Check if pg_search extension is available
     let pg_search_check: (bool,) = sqlx::query_as(
@@ -31,10 +26,8 @@ async fn main() -> Result<()> {
     .await?;
 
     if !pg_search_check.0 {
-        println!("✗ pg_search extension is NOT installed");
-        return Ok(());
+        anyhow::bail!("pg_search extension is NOT installed");
     }
-    println!("✓ pg_search extension is installed");
 
     // Verify products table exists
     let table_exists: (bool,) = sqlx::query_as(
@@ -44,29 +37,16 @@ async fn main() -> Result<()> {
     .await?;
 
     if !table_exists.0 {
-        println!("✗ products.items table does not exist");
-        return Ok(());
+        anyhow::bail!("products.items table does not exist");
     }
-    println!("✓ products.items table exists");
 
-    // Run test suite
-    test_bm25_match_disjunction(&pool).await?;
-    test_bm25_match_conjunction(&pool).await?;
-    test_bm25_field_specific_search(&pool).await?;
-    test_bm25_numeric_range_filter(&pool).await?;
-    test_bm25_score_ordering(&pool).await?;
-    test_bm25_category_filter(&pool).await?;
-    test_bm25_rating_filter(&pool).await?;
-    test_bm25_stock_filter(&pool).await?;
-    test_bm25_featured_products(&pool).await?;
-    test_bm25_brand_search(&pool).await?;
-
-    println!("\n✓ All BM25 tests passed!");
-    Ok(())
+    Ok(pool)
 }
 
 /// Test 1: Match Disjunction (|||) - Match ANY token
-async fn test_bm25_match_disjunction(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_match_disjunction() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 1: BM25 Disjunction (|||) - 'wireless headphones'");
 
     let query = r#"
@@ -77,7 +57,7 @@ async fn test_bm25_match_disjunction(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     assert!(!rows.is_empty(), "Should return results for 'wireless headphones'");
 
@@ -96,7 +76,9 @@ async fn test_bm25_match_disjunction(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 2: Match Conjunction (&&&) - Match ALL tokens
-async fn test_bm25_match_conjunction(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_match_conjunction() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 2: BM25 Conjunction (&&&) - 'wireless noise cancellation'");
 
     let query = r#"
@@ -107,7 +89,7 @@ async fn test_bm25_match_conjunction(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -120,7 +102,9 @@ async fn test_bm25_match_conjunction(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 3: Field-Specific Search
-async fn test_bm25_field_specific_search(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_field_specific_search() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 3: Field-Specific Search - 'keyboard' in name field");
 
     let query = r#"
@@ -131,7 +115,7 @@ async fn test_bm25_field_specific_search(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     assert!(!rows.is_empty(), "Should find products with 'keyboard' in name");
 
@@ -147,7 +131,9 @@ async fn test_bm25_field_specific_search(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 4: Numeric Range Filter with BM25
-async fn test_bm25_numeric_range_filter(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_numeric_range_filter() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 4: BM25 + Price Filter - 'headphones' between $50-$150");
 
     let query = r#"
@@ -160,7 +146,7 @@ async fn test_bm25_numeric_range_filter(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -177,7 +163,9 @@ async fn test_bm25_numeric_range_filter(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 5: Score Ordering Validation
-async fn test_bm25_score_ordering(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_score_ordering() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 5: BM25 Score Ordering - 'wireless'");
 
     let query = r#"
@@ -188,7 +176,7 @@ async fn test_bm25_score_ordering(pool: &PgPool) -> Result<()> {
         LIMIT 10
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     assert!(rows.len() >= 5, "Should return at least 5 results");
 
@@ -206,7 +194,9 @@ async fn test_bm25_score_ordering(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 6: Category Filter with BM25
-async fn test_bm25_category_filter(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_category_filter() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 6: BM25 + Category Filter - 'gaming' in Electronics");
 
     let query = r#"
@@ -218,7 +208,7 @@ async fn test_bm25_category_filter(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -234,7 +224,9 @@ async fn test_bm25_category_filter(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 7: Rating Filter with BM25
-async fn test_bm25_rating_filter(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_rating_filter() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 7: BM25 + Rating Filter - rating >= 4.5");
 
     let query = r#"
@@ -246,7 +238,7 @@ async fn test_bm25_rating_filter(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -263,7 +255,9 @@ async fn test_bm25_rating_filter(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 8: Stock Filter with BM25
-async fn test_bm25_stock_filter(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_stock_filter() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 8: BM25 + Stock Filter - in stock only");
 
     let query = r#"
@@ -276,7 +270,7 @@ async fn test_bm25_stock_filter(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -294,7 +288,9 @@ async fn test_bm25_stock_filter(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 9: Featured Products Search
-async fn test_bm25_featured_products(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_featured_products() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 9: BM25 Featured Products - 'camera'");
 
     let query = r#"
@@ -306,7 +302,7 @@ async fn test_bm25_featured_products(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");
@@ -322,7 +318,9 @@ async fn test_bm25_featured_products(pool: &PgPool) -> Result<()> {
 }
 
 /// Test 10: Brand-Specific Search
-async fn test_bm25_brand_search(pool: &PgPool) -> Result<()> {
+#[tokio::test]
+async fn test_bm25_brand_search() -> Result<()> {
+    let pool = setup_db().await?;
     println!("Test 10: Brand Search - 'Sony' products");
 
     let query = r#"
@@ -333,7 +331,7 @@ async fn test_bm25_brand_search(pool: &PgPool) -> Result<()> {
         LIMIT 5
     "#;
 
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let rows = sqlx::query(query).fetch_all(&pool).await?;
 
     for row in &rows {
         let name: String = row.get("name");

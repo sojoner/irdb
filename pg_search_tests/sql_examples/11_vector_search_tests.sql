@@ -1,30 +1,39 @@
 -- 11_vector_search_tests.sql
 -- Vector similarity search validation tests
 -- pgvector v0.8.0 operators: <=> (cosine), <-> (L2), <#> (inner product)
+--
+-- This test file is IDEMPOTENT and SELF-CONTAINED
+-- It sets up its own test data and cleans up after itself
+--
+-- Usage:
+--   psql -h localhost -U postgres -d database -f 11_vector_search_tests.sql
 
-\echo '=== Vector Search Tests ==='
+\echo '=============================================='
+\echo '=== Vector Search Tests (Self-Contained) ==='
+\echo '=============================================='
 
--- Generate test query embeddings (random for testing - replace with real embeddings in production)
-DO $$
-DECLARE
-    test_embedding vector(1536);
-BEGIN
-    -- Create a temp table to store test query embeddings
-    CREATE TEMP TABLE IF NOT EXISTS test_embeddings (
-        query_name TEXT PRIMARY KEY,
-        embedding vector(1536)
-    );
+--------------------------------------------------------------------------------
+-- SETUP: Initialize test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- SETUP: Loading test utilities and data ---'
 
-    -- Generate test embeddings for various queries
-    INSERT INTO test_embeddings (query_name, embedding) VALUES
-    ('wireless_audio', products.generate_random_embedding(1536)),
-    ('gaming_peripherals', products.generate_random_embedding(1536)),
-    ('professional_camera', products.generate_random_embedding(1536)),
-    ('office_furniture', products.generate_random_embedding(1536)),
-    ('outdoor_equipment', products.generate_random_embedding(1536));
+-- Load the test utilities (creates functions if not exist)
+\i test_utils.sql
 
-    RAISE NOTICE 'Generated test query embeddings';
-END $$;
+-- Run setup to create schema and load data
+SELECT * FROM test_utils.setup();
+
+-- Create test query embeddings
+SELECT * FROM test_utils.create_test_embeddings();
+
+\echo ''
+\echo '--- SETUP COMPLETE ---'
+\echo ''
+
+--------------------------------------------------------------------------------
+-- TEST SUITE: Vector Similarity Search
+--------------------------------------------------------------------------------
 
 -- Test 1: Basic Vector Similarity Search (Cosine Distance)
 \echo 'Test 1: Vector Search - Find similar to "wireless_audio" query'
@@ -35,7 +44,7 @@ SELECT
     category,
     price,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS cosine_similarity
-FROM products.items
+FROM test_products.items
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')
 LIMIT 10;
 
@@ -47,7 +56,7 @@ SELECT
     brand,
     category,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE 1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) > 0.5
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')
 LIMIT 10;
@@ -61,7 +70,7 @@ SELECT
     price,
     rating,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_peripherals')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE price < 200
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_peripherals')
 LIMIT 10;
@@ -76,7 +85,7 @@ SELECT
     price,
     rating,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_camera')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE category = 'Electronics'
   AND subcategory = 'Cameras'
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_camera')
@@ -92,7 +101,7 @@ SELECT
     rating,
     in_stock,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'office_furniture')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE category = 'Home & Garden'
   AND subcategory = 'Furniture'
   AND in_stock = true
@@ -108,7 +117,7 @@ SELECT
     brand,
     category,
     description_embedding <-> (SELECT embedding FROM test_embeddings WHERE query_name = 'outdoor_equipment') AS l2_distance
-FROM products.items
+FROM test_products.items
 ORDER BY description_embedding <-> (SELECT embedding FROM test_embeddings WHERE query_name = 'outdoor_equipment')
 LIMIT 10;
 
@@ -120,7 +129,7 @@ SELECT
     brand,
     price,
     description_embedding <#> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_peripherals') AS inner_product
-FROM products.items
+FROM test_products.items
 ORDER BY description_embedding <#> (SELECT embedding FROM test_embeddings WHERE query_name = 'gaming_peripherals')
 LIMIT 10;
 
@@ -133,7 +142,7 @@ SELECT
     rating,
     review_count,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE rating >= 4.7
   AND review_count > 1000
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')
@@ -147,7 +156,7 @@ SELECT
     brand,
     price,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_camera')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE price BETWEEN 100 AND 500
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'professional_camera')
 LIMIT 10;
@@ -161,7 +170,7 @@ SELECT
     category,
     featured,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE featured = true
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')
 LIMIT 10;
@@ -174,7 +183,7 @@ SELECT
     brand,
     stock_quantity,
     1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS similarity
-FROM products.items
+FROM test_products.items
 WHERE stock_quantity > 100
   AND in_stock = true
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')
@@ -189,7 +198,7 @@ WITH category_results AS (
         brand,
         category,
         1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS similarity
-    FROM products.items
+    FROM test_products.items
     ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')
     LIMIT 20
 )
@@ -203,7 +212,7 @@ ORDER BY count DESC;
 WITH similarities AS (
     SELECT
         1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS similarity
-    FROM products.items
+    FROM test_products.items
 )
 SELECT
     MIN(similarity) as min_similarity,
@@ -213,12 +222,12 @@ SELECT
     STDDEV(similarity) as stddev_similarity
 FROM similarities;
 
--- Performance check: Show query plan for vector search
+-- Test 14: Performance check - Show query plan for vector search
 \echo 'Test 14: EXPLAIN ANALYZE - HNSW index usage'
 EXPLAIN ANALYZE
 SELECT id, name,
        1 - (description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')) AS similarity
-FROM products.items
+FROM test_products.items
 ORDER BY description_embedding <=> (SELECT embedding FROM test_embeddings WHERE query_name = 'wireless_audio')
 LIMIT 10;
 
@@ -226,13 +235,24 @@ LIMIT 10;
 \echo 'Test 15: Vector Index Statistics'
 SELECT
     schemaname,
-    tablename,
-    indexname,
+    relname as tablename,
+    indexrelname as indexname,
     idx_scan,
     idx_tup_read,
     idx_tup_fetch
 FROM pg_stat_user_indexes
-WHERE tablename = 'items' AND schemaname = 'products'
-  AND indexname = 'products_vector_idx';
+WHERE relname = 'items' AND schemaname = 'test_products'
+  AND indexrelname = 'test_products_vector_idx';
 
+--------------------------------------------------------------------------------
+-- TEARDOWN: Clean up test environment
+--------------------------------------------------------------------------------
+\echo ''
+\echo '--- TEARDOWN: Cleaning up test data ---'
+
+SELECT * FROM test_utils.teardown();
+
+\echo ''
+\echo '=============================================='
 \echo '=== Vector Search Tests Complete ==='
+\echo '=============================================='
