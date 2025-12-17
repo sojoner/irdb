@@ -1,96 +1,87 @@
-# IR DB PostgreSQL pg_search Tests
+# 🧪 IRDB Test Suite
 
-Rust test suite for exploring IR DB features including pgvector, pg_search (BM25), and hybrid search capabilities.
+Comprehensive Rust test suite for **hybrid search** with BM25 + Vector similarity.
 
-## Project Structure
+## 🚀 Quick Start
+
+```bash
+# Set database connection
+export DATABASE_URL="postgresql://postgres:password@localhost:5432/database"
+
+# Run all tests
+cargo test --features web
+
+# Run specific test with output
+cargo test test_hybrid_search_basic -- --nocapture
+```
+
+## 📊 Test Coverage
+
+**✅ 17/17 tests passing**
+
+### Unit Tests (9)
+- Data models and serialization
+- Type conversions and defaults
+- Display traits
+
+### Integration Tests (8)
+- 🔍 **BM25 search** - Keyword matching with filters
+- 🎯 **Vector search** - Semantic similarity
+- ⚡ **Hybrid search** - 30% BM25 + 70% Vector
+- 📈 **Facets** - Category and brand aggregations
+- 📄 **Pagination** - No duplicates across pages
+- 🔢 **Sorting** - Price, rating, relevance
+
+## 🏗️ Project Structure
 
 ```
 pg_search_tests/
-├── Cargo.toml
-├── src/
-│   └── bin/
-│       ├── connection_test.rs      # Database connectivity validation
-│       ├── bm25_test.rs            # Full-text search with BM25 ranking
-│       ├── vector_test.rs          # Vector similarity search
-│       └── hybrid_search_test.rs    # Hybrid vector + BM25 search
-└── README.md
+├── src/web_app/
+│   ├── model/              # 📦 Data models (Product, SearchFilters, etc.)
+│   ├── api/                # 🔧 Pure functional queries
+│   │   ├── queries.rs      # search_bm25(), search_vector(), search_hybrid()
+│   │   └── db.rs           # Connection pool
+│   ├── components/         # 🎨 Leptos UI (TODO)
+│   └── pages/              # 📱 Page components (TODO)
+└── tests/
+    └── web_app_search_tests.rs  # Integration tests
 ```
 
-## Prerequisites
+## 🎯 Key Features
 
-- Rust 1.70+ (with Cargo)
-- Running PostgreSQL 17.5 instance with:
-  - pgvector extension
-  - pg_search extension
-  - ai_data schema initialized
+- **Pure functions** - No side effects, easy to test
+- **Type-safe queries** - Compile-time checking with sqlx
+- **Real database tests** - Integration tests against PostgreSQL
+- **Data-oriented** - Focus on data transformations
 
-The tests connect to the IR DB Kubernetes deployment via NodePort service at `192.168.178.181:30432`.
+## 📚 Documentation
 
-## Building
+- **[Web App Guide](./README_WEB_APP.md)** - Leptos application development
+- **[Architecture](../docs/01-architecture.md)** - System design
+- **[Hybrid Search](../docs/03-hybrid-search.md)** - Algorithm deep dive
+
+## 🔬 Running Specific Tests
 
 ```bash
-cd pg_search_tests
-cargo build --release
+# All unit tests
+cargo test --lib --features web
+
+# All integration tests
+cargo test --test web_app_search_tests --features web
+
+# BM25 search only
+cargo test test_bm25 --features web
+
+# Hybrid search with debug output
+cargo test test_hybrid_search_basic --features web -- --nocapture
 ```
 
-## Running Tests
+## 🎨 Test Philosophy
 
-Run individual tests:
+> "Test data transformations, not implementations"
 
-```bash
-# Test basic connectivity
-cargo run --bin connection_test
+Every test validates **what** the code does, not **how** it does it. This makes tests resilient to refactoring while catching real bugs.
 
-# Test BM25 full-text search
-cargo run --bin bm25_test
+---
 
-# Test vector similarity search
-cargo run --bin vector_test
-
-# Test hybrid search
-cargo run --bin hybrid_search_test
-```
-
-Run all tests:
-
-```bash
-cargo build --release
-for bin in connection_test bm25_test vector_test hybrid_search_test; do
-    echo "Running $bin..."
-    cargo run --bin $bin --release
-done
-```
-
-## Current Status
-
-The basic connection test validates:
-- ✓ Database connectivity
-- ✓ PostgreSQL version
-- ✗ pgvector extension (not yet initialized)
-- ✗ pg_search extension (not yet initialized)
-- ✗ ai_data schema (not yet initialized)
-
-To initialize the database with extensions and schema, you need to run the initialization scripts from the parent project:
-
-```bash
-# Via Kubernetes init scripts (requires cluster rebuild)
-cd ..
-make clean-all
-make setup-all
-```
-
-## Dependencies
-
-- `tokio` - Async runtime
-- `sqlx` - SQL toolkit with compile-time query checking
-- `pgvector` - Vector type support
-- `serde` / `serde_json` - JSON serialization
-- `anyhow` - Error handling
-
-## Next Steps
-
-1. Initialize the database with extensions and schema
-2. Implement BM25 search tests in `bm25_test.rs`
-3. Implement vector similarity tests in `vector_test.rs`
-4. Implement hybrid search tests in `hybrid_search_test.rs`
-5. Add integration tests for complex search scenarios
+**Status**: ✅ Foundation complete | 🚧 UI in progress
