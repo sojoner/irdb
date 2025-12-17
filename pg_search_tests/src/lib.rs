@@ -6,3 +6,6 @@
 
 /// The fixtures module contains reusable test data and database setup
 pub mod fixtures;
+
+/// The web_app module contains the Leptos-based web application
+pub mod web_app;
