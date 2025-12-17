@@ -1,136 +1,54 @@
-# IR DB - AI-Enhanced PostgreSQL Platform
+# IRDB - Learning Hybrid Search in PostgreSQL & Rust
 
-PostgreSQL 17.5 with pgvector and ParadeDB extensions, optimized for RAG (Retrieval Augmented Generation) applications.
+A study project exploring **hybrid search** by combining BM25 full-text search with vector similarity search in PostgreSQL.
 
-## Features
+## What is This?
 
-- **PostgreSQL 17.5** - Latest stable release
-- **pgvector v0.8.0** - Vector similarity search (1536 dimensions for OpenAI embeddings)
-- **ParadeDB pg_search v0.20.x** - Full-text search with BM25 ranking
-- **Hybrid Search** - Combines vector similarity (70%) and text search (30%)
-- **Pre-configured RAG Schema** - Ready-to-use tables, indexes, and functions
-- **Multi-stage Docker Build** - Optimized ~850MB final image
-- **Production-Ready Helm Chart** - CloudNativePG for Kubernetes
+This project demonstrates how to combine two complementary search approaches:
 
-## Quick Start
+- **Lexical search (BM25)** - Keyword matching for brands, models, technical terms
+- **Semantic search (Vector)** - Meaning-based similarity for natural language queries
+- **Weighted combination** - Blending both methods (30% BM25 + 70% Vector)
 
-Choose your deployment method:
+## Key Technologies
+
+- **PostgreSQL 17.5** - Latest stable PostgreSQL
+- **ParadeDB pg_search 0.20.2** - BM25 full-text search with custom operators
+- **pgvector 0.8.0** - Vector similarity search with HNSW indexing
+- **Rust** - Type-safe, data-oriented API layer
+- **Leptos 0.7+** - Reactive web framework (in progress)
+- **CloudNativePG** - Kubernetes operator for high availability
 
 ## Documentation
 
-### Deployment Guides
+Comprehensive documentation is available in the [docs/](./docs/) directory:
 
-- **[README_DOCKER.md](README_DOCKER.md)** - Docker Compose deployment for local development
-  - pgAdmin setup, backup/restore, performance tuning, Docker-specific troubleshooting
-
-- **[README_K8s.md](README_K8s.md)** - Kubernetes deployment with CloudNativePG operator
-  - High availability, scaling, monitoring, Kubernetes-specific troubleshooting
-
-- **[k8s/README.md](k8s/README.md)** - Helm chart reference and CloudNativePG best practices
-  - Chart configuration, resource management, backup strategies, production checklist
-
-### Developer Resources
-
-- **[.claude/CLAUDE.md](.claude/CLAUDE.md)** - Development guide for contributors using Claude Code
-- **[pg_search_tests/README.md](pg_search_tests/README.md)** - Test suite documentation
-  - BM25 full-text search tests
-  - Vector search validation
-  - Hybrid search functionality
-  - Database configuration tests
-
-## Testing
-
-Run the test suite with:
-
-```bash
-cd pg_search_tests
-cargo test
-```
-
-**Test categories:**
-
-- **advanced_search_tests.rs** - ParadeDB pg_search 0.20.x BM25 syntax and fuzzy matching
-- **bm25_detailed_tests.rs** - Comprehensive BM25 search scenarios (12 tests)
-- **dbtuning_test.rs** - PostgreSQL configuration validation (17 tests)
-- **integration_tests.rs** - Basic integration testing
-
-All tests use isolated temporary tables to ensure they can run independently.
-
-## Resources
-
-- [PostgreSQL 17 Documentation](https://www.postgresql.org/docs/17/)
-- [pgvector GitHub](https://github.com/pgvector/pgvector)
-- [ParadeDB Documentation](https://docs.paradedb.com/)
-- [CloudNativePG Documentation](https://cloudnative-pg.io/documentation/)
-
-## Structure
-
-```bash
-.
-├── .claude
-│   ├── 2025-12-11-documentation.md
-│   ├── 2025-12-11-pg_search-rust-test-examples.md
-│   ├── CLAUDE.md
-│   └── settings.local.json
-├── .git
-│   ├── hooks
-│   ├── info
-│   ├── logs
-│   ├── objects
-│   ├── refs
-│   ├── COMMIT_EDITMSG
-│   ├── config
-│   ├── description
-│   ├── FETCH_HEAD
-│   ├── HEAD
-│   ├── index
-│   └── ORIG_HEAD
-├── docker-entrypoint-initdb.d
-│   ├── 00-extensions.sql
-│   ├── 01-ai-extensions.sql
-│   ├── 02-validating-bm25.sql
-│   ├── 03-simple-vector-test.sql
-│   └── 05-comprehensive-test.sql
-├── k8s
-│   ├── charts
-│   ├── templates
-│   ├── .helmignore
-│   ├── Chart.lock
-│   ├── Chart.yaml
-│   ├── README.md
-│   ├── setup.sh
-│   ├── values-dev.yaml
-│   ├── values-prod.yaml
-│   ├── values.yaml
-│   └── verify-extensions.sh
-├── pg_search_tests
-│   ├── sql_examples
-│   ├── src
-│   ├── target
-│   ├── tests
-│   ├── .gitignore
-│   ├── Cargo.lock
-│   ├── Cargo.toml
-│   └── README.md
-├── .DS_Store
-├── .gitignore
-├── docker-compose.yml
-├── Dockerfile
-├── kind-config.yaml
-├── Makefile
-├── postgresql.conf
-├── README_DOCKER.md
-├── README_K8s.md
-└── README.md
-```
+1. **[Architecture Overview](./docs/01-architecture.md)** - System design, technologies, and architectural decisions
+2. **[Deployment Guide](./docs/02-deployment.md)** - Docker Compose and Kubernetes deployment
+3. **[Hybrid Search Deep Dive](./docs/03-hybrid-search.md)** - Implementation details, algorithm, and examples
+4. **[Web Application Development](./docs/04-web-app.md)** - Building the Leptos-based UI
+5. **[References & Resources](./docs/05-references.md)** - Papers, documentation, and learning resources
+6. **[Testing Guide](./docs/06-testing.md)** - Testing and coverage notes
 
 ## License
 
-[Add your license here]
+Apache License 2.0 - See [LICENSE](./LICENSE) file for details.
 
-## Contributing
+This is a study project demonstrating hybrid search techniques. The code is provided as-is for learning and research purposes.
 
-[Add contributing guidelines here]
+## Acknowledgments
+
+Built with open-source technologies:
+
+- **PostgreSQL Global Development Group** - Core database
+- **ParadeDB Team** - BM25 search extension
+- **pgvector Contributors** - Vector similarity search
+- **Leptos Team** - Rust web framework
+- **CloudNativePG Team** - Kubernetes operator
+- **Rust Community** - Language and ecosystem
 
 ---
-© 2025 Sojoner
+**Study Focus**: Hybrid Search in PostgreSQL & Rust
+**Last Updated**: 2025-12-17
+
+© 2025 sojoner
