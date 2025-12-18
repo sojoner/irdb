@@ -521,4 +521,18 @@ mod tests {
         assert_eq!(modes.len(), 3);
         assert_eq!(SearchMode::default(), SearchMode::Hybrid);
     }
+
+    #[test]
+    fn test_pagination_logic_pure() {
+        // Test the math behind pagination
+        let total_items = 100i64;
+        let page_size = 10u32;
+        
+        let total_pages = (total_items as f64 / page_size as f64).ceil() as u32;
+        assert_eq!(total_pages, 10);
+
+        let total_items_2 = 101i64;
+        let total_pages_2 = (total_items_2 as f64 / page_size as f64).ceil() as u32;
+        assert_eq!(total_pages_2, 11);
+    }
 }

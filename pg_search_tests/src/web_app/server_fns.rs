@@ -18,44 +18,27 @@ async fn pool() -> Result<sqlx::PgPool, ServerFnError> {
     use leptos_actix::extract;
     use crate::web_app::api::db;
     
-    tracing::info!("pool() called - attempting to resolve database connection");
-
     // First try to get from context (for testing or if manually set)
     if let Some(pool) = use_context::<PgPool>() {
-        tracing::info!("Found PgPool in Leptos context");
         return Ok(pool);
-    } else {
-        tracing::warn!("PgPool NOT found in Leptos context");
     }
 
     // Try global pool (most reliable fallback)
     if let Some(pool) = db::get_db() {
-        tracing::info!("Using global PgPool from db::get_db()");
         return Ok(pool);
-    } else {
-        tracing::error!("Global PgPool is empty (db::get_db() returned None)");
     }
 
-    tracing::info!("Extracting HttpRequest to find pool...");
     let req_result = extract().await;
 
     match req_result {
         Ok(req) => {
             let req: HttpRequest = req;
-            tracing::info!("HttpRequest extracted successfully");
-
             if let Some(pool_data) = req.app_data::<Data<PgPool>>() {
-                tracing::info!("Found Data<PgPool> in request app_data");
                 return Ok(pool_data.as_ref().clone());
-            } else {
-                tracing::warn!("Data<PgPool> NOT found in request app_data");
             }
 
             if let Some(pool) = req.app_data::<PgPool>() {
-                tracing::info!("Found PgPool in request app_data");
                 return Ok(pool.clone());
-            } else {
-                tracing::warn!("PgPool NOT found in request app_data");
             }
         },
         Err(e) => {
@@ -63,32 +46,18 @@ async fn pool() -> Result<sqlx::PgPool, ServerFnError> {
         }
     }
 
-    tracing::error!("CRITICAL: Database pool could not be resolved from any source");
     Err(ServerFnError::new("Database pool not available"))
 }
 
 /// Search products with specified mode and filters
-///
-/// This is the main search endpoint. It dispatches to the appropriate
-/// search function (BM25, Vector, or Hybrid) based on the mode parameter.
-///
-/// # Arguments
-/// * `query` - The search query string
-/// * `mode` - Which search algorithm to use
-/// * `filters` - Filtering, sorting, and pagination options
-///
-/// # Returns
-/// * `SearchResults` with products, facets, and metadata
 #[server(SearchProducts, "/api")]
 pub async fn search_products(
     query: String,
     mode: SearchMode,
     filters: SearchFilters,
 ) -> Result<SearchResults, ServerFnError> {
-    // Server-side implementation - only compiled when ssr feature is enabled
     use crate::web_app::api::queries;
 
-    // Add logging
     tracing::info!("Search request: query='{}', mode={:?}, filters={:?}", query, mode, filters);
 
     // Extract the database pool
@@ -110,8 +79,6 @@ pub async fn search_products(
 }
 
 /// Get a single product by ID
-///
-/// Used for the product detail modal/page.
 #[server(GetProduct, "/api")]
 pub async fn get_product(id: i32) -> Result<Product, ServerFnError> {
     use sqlx::Row;
@@ -155,8 +122,6 @@ pub async fn get_product(id: i32) -> Result<Product, ServerFnError> {
 }
 
 /// Get analytics data for the dashboard
-///
-/// Returns aggregate statistics about products in the database.
 #[server(GetAnalytics, "/api")]
 pub async fn get_analytics() -> Result<AnalyticsData, ServerFnError> {
     use sqlx::Row;

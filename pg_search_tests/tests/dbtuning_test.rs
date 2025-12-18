@@ -197,7 +197,7 @@ async fn test_log_min_duration_statement_configured() -> Result<(), Box<dyn std:
     // Expected: 1000 (1 second), but CloudNativePG may have different values
     // Accept any numeric value as it's not critical for functionality
     assert!(
-        value == "1000" || value == "-1" || value.contains("ms") || value == "100",
+        value == "1000" || value == "-1" || value.contains("ms") || value == "100" || value == "1s",
         "log_min_duration_statement should be configured, got: {}",
         value
     );

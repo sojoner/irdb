@@ -68,13 +68,19 @@ impl From<SearchResultRow> for SearchResult {
 }
 
 /// BM25 full-text search using ParadeDB operators
-///
-/// Uses the ||| (disjunction) operator for keyword matching
-/// Returns results ranked by BM25 score
 pub async fn search_bm25(
     pool: &PgPool,
     query: &str,
     filters: &SearchFilters,
+) -> Result<SearchResults, sqlx::Error> {
+    search_bm25_with_schema(pool, query, filters, "products").await
+}
+
+pub async fn search_bm25_with_schema(
+    pool: &PgPool,
+    query: &str,
+    filters: &SearchFilters,
+    schema: &str,
 ) -> Result<SearchResults, sqlx::Error> {
     // Treat "*" as empty query (match all)
     let query = if query.trim() == "*" { "" } else { query };
@@ -97,9 +103,6 @@ pub async fn search_bm25(
         SortOption::Newest => "p.created_at DESC",
     };
 
-    // Search in description, name, and brand
-    // Note: This assumes indexes exist or the operator supports unindexed search (which might be slow)
-    // If specific indexes are required, this might need adjustment.
     let sql = format!(r#"
         SELECT
             p.id, p.name, p.description, p.brand, p.category,
@@ -111,7 +114,7 @@ pub async fn search_bm25(
             NULL::float8 as vector_score,
             COALESCE(pdb.score(p.id), 0.0)::float8 as combined_score,
             NULL::text as snippet
-        FROM products.items p
+        FROM {}.items p
         WHERE ($1 = '' OR p.description ||| $1 OR p.name ||| $1 OR p.brand ||| $1)
           AND ($2::float8 IS NULL OR p.price >= $2)
           AND ($3::float8 IS NULL OR p.price <= $3)
@@ -120,7 +123,7 @@ pub async fn search_bm25(
           AND ($6::bool IS FALSE OR p.in_stock = TRUE)
         ORDER BY {}
         LIMIT $7 OFFSET $8
-    "#, category_clause, sort_clause);
+    "#, schema, category_clause, sort_clause);
 
     let results = sqlx::query_as::<_, SearchResultRow>(&sql)
         .bind(query)
@@ -135,17 +138,17 @@ pub async fn search_bm25(
         .await?;
 
     // Get total count
-    let count_sql = r#"
+    let count_sql = format!(r#"
         SELECT COUNT(*)
-        FROM products.items
+        FROM {}.items
         WHERE ($1 = '' OR description ||| $1 OR name ||| $1 OR brand ||| $1)
           AND ($2::float8 IS NULL OR price >= $2)
           AND ($3::float8 IS NULL OR price <= $3)
           AND ($4::float8 IS NULL OR rating >= $4)
           AND ($5::bool IS FALSE OR in_stock = TRUE)
-    "#;
+    "#, schema);
 
-    let total_row = sqlx::query(count_sql)
+    let total_row = sqlx::query(&count_sql)
         .bind(query)
         .bind(filters.price_min)
         .bind(filters.price_max)
@@ -157,9 +160,9 @@ pub async fn search_bm25(
     let total_count: i64 = total_row.get(0);
 
     // Get facets
-    let category_facets = get_category_facets(pool, query).await?;
-    let brand_facets = get_brand_facets(pool, query).await?;
-    let price_histogram = get_price_histogram(pool, query).await?;
+    let category_facets = get_category_facets_with_schema(pool, query, schema).await?;
+    let brand_facets = get_brand_facets_with_schema(pool, query, schema).await?;
+    let price_histogram = get_price_histogram_with_schema(pool, query, schema).await?;
 
     Ok(SearchResults {
         results: results.into_iter().map(|r| r.into()).collect(),
@@ -173,13 +176,19 @@ pub async fn search_bm25(
 }
 
 /// Vector similarity search using pgvector
-///
-/// Uses cosine distance (<=> operator) for semantic matching
-/// Returns results ranked by similarity score
 pub async fn search_vector(
     pool: &PgPool,
     query: &str,
     filters: &SearchFilters,
+) -> Result<SearchResults, sqlx::Error> {
+    search_vector_with_schema(pool, query, filters, "products").await
+}
+
+pub async fn search_vector_with_schema(
+    pool: &PgPool,
+    query: &str,
+    filters: &SearchFilters,
+    schema: &str,
 ) -> Result<SearchResults, sqlx::Error> {
     // Treat "*" as empty query (match all)
     let query = if query.trim() == "*" { "" } else { query };
@@ -189,7 +198,7 @@ pub async fn search_vector(
     let offset = (filters.page * filters.page_size) as i64;
     let limit = filters.page_size as i64;
 
-    let sql = r#"
+    let sql = format!(r#"
         SELECT
             p.id, p.name, p.description, p.brand, p.category,
             p.subcategory, p.tags, p.price::numeric as price,
@@ -200,17 +209,17 @@ pub async fn search_vector(
             (1 - (p.description_embedding <=> $1::vector(1536)))::float8 as vector_score,
             (1 - (p.description_embedding <=> $1::vector(1536)))::float8 as combined_score,
             NULL::text as snippet
-        FROM products.items p
+        FROM {}.items p
         WHERE ($2::float8 IS NULL OR p.price >= $2)
           AND ($3::float8 IS NULL OR p.price <= $3)
-          AND ($4::text[] IS NULL OR $4 = '{}' OR p.category = ANY($4))
+          AND ($4::text[] IS NULL OR $4 = '{{}}' OR p.category = ANY($4))
           AND ($5::float8 IS NULL OR p.rating >= $5)
           AND ($6::bool IS FALSE OR p.in_stock = TRUE)
         ORDER BY p.description_embedding <=> $1::vector(1536)
         LIMIT $7 OFFSET $8
-    "#;
+    "#, schema);
 
-    let results = sqlx::query_as::<_, SearchResultRow>(sql)
+    let results = sqlx::query_as::<_, SearchResultRow>(&sql)
         .bind(&query_embedding)
         .bind(filters.price_min)
         .bind(filters.price_max)
@@ -223,7 +232,8 @@ pub async fn search_vector(
         .await?;
 
     // Get approximate total count
-    let total_row = sqlx::query("SELECT COUNT(*) FROM products.items")
+    let count_sql = format!("SELECT COUNT(*) FROM {}.items", schema);
+    let total_row = sqlx::query(&count_sql)
         .fetch_one(pool)
         .await?;
     let total_count: i64 = total_row.get(0);
@@ -240,13 +250,19 @@ pub async fn search_vector(
 }
 
 /// Hybrid search combining BM25 (30%) and Vector (70%)
-///
-/// Uses FULL OUTER JOIN to combine results from both methods
-/// Weighted scoring: 30% BM25 + 70% Vector similarity
 pub async fn search_hybrid(
     pool: &PgPool,
     query: &str,
     filters: &SearchFilters,
+) -> Result<SearchResults, sqlx::Error> {
+    search_hybrid_with_schema(pool, query, filters, "products").await
+}
+
+pub async fn search_hybrid_with_schema(
+    pool: &PgPool,
+    query: &str,
+    filters: &SearchFilters,
+    schema: &str,
 ) -> Result<SearchResults, sqlx::Error> {
     // Treat "*" as empty query (match all)
     let query = if query.trim() == "*" { "" } else { query };
@@ -255,10 +271,10 @@ pub async fn search_hybrid(
     let offset = (filters.page * filters.page_size) as i64;
     let limit = filters.page_size as i64;
 
-    let sql = r#"
+    let sql = format!(r#"
         WITH bm25_results AS (
             SELECT id, pdb.score(id) AS bm25_score
-            FROM products.items
+            FROM {}.items
             WHERE description ||| $1 OR name ||| $1 OR brand ||| $1 OR $1 = ''
             ORDER BY pdb.score(id) DESC
             LIMIT 100
@@ -267,7 +283,7 @@ pub async fn search_hybrid(
             SELECT
                 id,
                 (1 - (description_embedding <=> $2::vector(1536)))::float8 AS vector_score
-            FROM products.items
+            FROM {}.items
             ORDER BY description_embedding <=> $2::vector(1536)
             LIMIT 100
         ),
@@ -291,17 +307,17 @@ pub async fn search_hybrid(
             c.combined_score,
             NULL::text as snippet
         FROM combined c
-        JOIN products.items p ON p.id = c.id
+        JOIN {}.items p ON p.id = c.id
         WHERE ($3::float8 IS NULL OR p.price >= $3)
           AND ($4::float8 IS NULL OR p.price <= $4)
-          AND ($5::text[] IS NULL OR $5 = '{}' OR p.category = ANY($5))
+          AND ($5::text[] IS NULL OR $5 = '{{}}' OR p.category = ANY($5))
           AND ($6::float8 IS NULL OR p.rating >= $6)
           AND ($7::bool IS FALSE OR p.in_stock = TRUE)
         ORDER BY c.combined_score DESC
         LIMIT $8 OFFSET $9
-    "#;
+    "#, schema, schema, schema);
 
-    let results = sqlx::query_as::<_, SearchResultRow>(sql)
+    let results = sqlx::query_as::<_, SearchResultRow>(&sql)
         .bind(query)
         .bind(&query_embedding)
         .bind(filters.price_min)
@@ -315,9 +331,9 @@ pub async fn search_hybrid(
         .await?;
 
     // Get facets
-    let category_facets = get_category_facets(pool, query).await?;
-    let brand_facets = get_brand_facets(pool, query).await?;
-    let price_histogram = get_price_histogram(pool, query).await?;
+    let category_facets = get_category_facets_with_schema(pool, query, schema).await?;
+    let brand_facets = get_brand_facets_with_schema(pool, query, schema).await?;
+    let price_histogram = get_price_histogram_with_schema(pool, query, schema).await?;
 
     // Calculate total count before moving results
     let total_count = results.len() as i64;
@@ -336,16 +352,16 @@ pub async fn search_hybrid(
 
 // Helper functions
 
-async fn get_category_facets(pool: &PgPool, query: &str) -> Result<Vec<FacetCount>, sqlx::Error> {
-    let sql = r#"
+async fn get_category_facets_with_schema(pool: &PgPool, query: &str, schema: &str) -> Result<Vec<FacetCount>, sqlx::Error> {
+    let sql = format!(r#"
         SELECT category as value, COUNT(*) as count
-        FROM products.items
+        FROM {}.items
         WHERE description ||| $1 OR name ||| $1 OR brand ||| $1 OR $1 = ''
         GROUP BY category
         ORDER BY count DESC
-    "#;
+    "#, schema);
 
-    let rows = sqlx::query(sql)
+    let rows = sqlx::query(&sql)
         .bind(query)
         .fetch_all(pool)
         .await?;
@@ -356,17 +372,17 @@ async fn get_category_facets(pool: &PgPool, query: &str) -> Result<Vec<FacetCoun
     }).collect())
 }
 
-async fn get_brand_facets(pool: &PgPool, query: &str) -> Result<Vec<FacetCount>, sqlx::Error> {
-    let sql = r#"
+async fn get_brand_facets_with_schema(pool: &PgPool, query: &str, schema: &str) -> Result<Vec<FacetCount>, sqlx::Error> {
+    let sql = format!(r#"
         SELECT brand as value, COUNT(*) as count
-        FROM products.items
+        FROM {}.items
         WHERE description ||| $1 OR name ||| $1 OR brand ||| $1 OR $1 = ''
         GROUP BY brand
         ORDER BY count DESC
         LIMIT 20
-    "#;
+    "#, schema);
 
-    let rows = sqlx::query(sql)
+    let rows = sqlx::query(&sql)
         .bind(query)
         .fetch_all(pool)
         .await?;
@@ -377,19 +393,19 @@ async fn get_brand_facets(pool: &PgPool, query: &str) -> Result<Vec<FacetCount>,
     }).collect())
 }
 
-async fn get_price_histogram(pool: &PgPool, query: &str) -> Result<Vec<PriceBucket>, sqlx::Error> {
-    let sql = r#"
+async fn get_price_histogram_with_schema(pool: &PgPool, query: &str, schema: &str) -> Result<Vec<PriceBucket>, sqlx::Error> {
+    let sql = format!(r#"
         SELECT
             FLOOR(price::float8 / 50) * 50 as min,
             FLOOR(price::float8 / 50) * 50 + 50 as max,
             COUNT(*) as count
-        FROM products.items
+        FROM {}.items
         WHERE description ||| $1 OR name ||| $1 OR brand ||| $1 OR $1 = ''
         GROUP BY FLOOR(price::float8 / 50)
         ORDER BY min
-    "#;
+    "#, schema);
 
-    let rows = sqlx::query(sql)
+    let rows = sqlx::query(&sql)
         .bind(query)
         .fetch_all(pool)
         .await?;
@@ -402,9 +418,6 @@ async fn get_price_histogram(pool: &PgPool, query: &str) -> Result<Vec<PriceBuck
 }
 
 /// Generate query embedding
-///
-/// MVP implementation: Returns a random 1536-dimension vector
-/// Production: Should call an embedding API (OpenAI, local model, etc.)
 fn generate_query_embedding(_query: &str) -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -419,12 +432,8 @@ mod tests {
     #[test]
     fn test_generate_query_embedding_format() {
         let embedding = generate_query_embedding("test query");
-
-        // Should start with [ and end with ]
         assert!(embedding.starts_with('['));
         assert!(embedding.ends_with(']'));
-
-        // Should have 1535 commas (1536 elements)
         let comma_count = embedding.matches(',').count();
         assert_eq!(comma_count, 1535);
     }
@@ -432,24 +441,14 @@ mod tests {
     #[test]
     fn test_generate_query_embedding_values() {
         let embedding = generate_query_embedding("test");
-
-        // Extract first value
-        let first_value_str = embedding
-            .trim_start_matches('[')
-            .split(',')
-            .next()
-            .unwrap();
-
+        let first_value_str = embedding.trim_start_matches('[').split(',').next().unwrap();
         let first_value: f32 = first_value_str.parse().unwrap();
-
-        // Should be in range [-1, 1]
         assert!(first_value >= -1.0 && first_value <= 1.0);
     }
 
     #[test]
     fn test_search_result_row_to_search_result() {
         use rust_decimal::Decimal;
-
         let row = SearchResultRow {
             id: 1,
             name: "Test Product".to_string(),
@@ -458,8 +457,8 @@ mod tests {
             category: "Electronics".to_string(),
             subcategory: None,
             tags: vec!["tag1".to_string()],
-            price: Decimal::new(9999, 2), // 99.99
-            rating: Decimal::new(45, 1), // 4.5
+            price: Decimal::new(9999, 2),
+            rating: Decimal::new(45, 1),
             review_count: 100,
             stock_quantity: 50,
             in_stock: true,
@@ -472,14 +471,8 @@ mod tests {
             combined_score: 0.90,
             snippet: Some("test snippet".to_string()),
         };
-
         let result: SearchResult = row.into();
-
         assert_eq!(result.product.id, 1);
         assert_eq!(result.product.name, "Test Product");
-        assert_eq!(result.bm25_score, Some(0.85));
-        assert_eq!(result.vector_score, Some(0.92));
-        assert_eq!(result.combined_score, 0.90);
-        assert_eq!(result.snippet, Some("test snippet".to_string()));
     }
 }

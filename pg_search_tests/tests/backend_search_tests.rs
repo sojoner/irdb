@@ -1,21 +1,15 @@
+mod common;
+
 use pg_search_tests::web_app::api::queries;
 use pg_search_tests::web_app::model::{SearchFilters, SortOption};
-use sqlx::postgres::PgPoolOptions;
-use std::env;
+
+use common::{create_test_pool, setup_test_db, teardown_test_db};
 
 #[tokio::test]
 async fn test_backend_search() -> anyhow::Result<()> {
-    // Load environment variables
-    dotenv::dotenv().ok();
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-
-    // Connect to database
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
-
-    println!("Connected to database: {}", database_url);
+    // Setup with default "products" schema (what queries module expects)
+    let pool = create_test_pool().await?;
+    setup_test_db(&pool, None).await?; // None = use default "products" schema
 
     // Default filters
     let filters = SearchFilters {
@@ -72,6 +66,9 @@ async fn test_backend_search() -> anyhow::Result<()> {
     let results = queries::search_hybrid(&pool, "", &filters).await?;
     println!("Found {} results for empty query", results.total_count);
     assert!(results.total_count > 0, "Empty query should return results");
+
+    // Cleanup
+    teardown_test_db(&pool, None).await?;
 
     Ok(())
 }

@@ -6,8 +6,10 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::env;
 use std::sync::OnceLock;
+use std::sync::Mutex;
 
 static POOL: OnceLock<PgPool> = OnceLock::new();
+static TEST_POOL_OVERRIDE: Mutex<Option<PgPool>> = Mutex::new(None);
 
 /// Initialize the global database pool
 pub fn init_db(pool: PgPool) {
@@ -19,8 +21,22 @@ pub fn init_db(pool: PgPool) {
     }
 }
 
+/// Set a pool override for testing
+pub fn set_test_pool(pool: PgPool) {
+    let mut guard = TEST_POOL_OVERRIDE.lock().unwrap();
+    *guard = Some(pool);
+}
+
 /// Get the global database pool
 pub fn get_db() -> Option<PgPool> {
+    // Check for test override first
+    {
+        let guard = TEST_POOL_OVERRIDE.lock().unwrap();
+        if let Some(ref pool) = *guard {
+            return Some(pool.clone());
+        }
+    }
+
     let pool = POOL.get().cloned();
     if pool.is_some() {
         tracing::debug!("Global pool retrieved successfully");
@@ -49,7 +65,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Requires database connection
     async fn test_create_pool() {
         dotenv::dotenv().ok();
 
@@ -59,7 +74,8 @@ mod tests {
         let pool = pool_result.unwrap();
 
         // Test basic query
-        let result: (i64,) = sqlx::query_as("SELECT 1")
+        // In PostgreSQL, SELECT 1 returns INT4 (i32)
+        let result: (i32,) = sqlx::query_as("SELECT 1")
             .fetch_one(&pool)
             .await
             .unwrap();
