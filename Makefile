@@ -6,13 +6,17 @@ CLUSTER_NAME ?= irdb-cluster
 NAMESPACE ?= irdb
 OPERATOR_NAMESPACE ?= cnpg-system
 IMAGE_NAME ?= sojoner/database
-IMAGE_TAG_CURRENT ?= 0.0.8
+IMAGE_TAG_CURRENT ?= 0.0.9
 IMAGE_TAG_PG_VERSION ?= 17
-KUSTOMIZE_OVERLAY ?= overlays/dev
 DB_PASSWORD ?= custom_secure_password_123
 DB_USER ?= postgres
 DB_NAME ?= database
 DB_PORT ?= 5432
+
+# BuildKit configuration
+DOCKER_BUILDKIT ?= 1
+BUILDKIT_PROGRESS ?= plain
+BUILD_CACHE_DIR ?= /tmp/docker-build-cache
 
 # Colors for output
 CYAN := \033[0;36m
@@ -51,6 +55,9 @@ help: ## Show this help message
 	@echo ''
 	@echo '$(YELLOW)Docker Compose:$(NC)'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E 'compose-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2}'
+	@echo ''
+	@echo '$(YELLOW)Docker Build Performance:$(NC)'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(^build|build-)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2}'
 	@echo ''
 	@echo '$(YELLOW)Cleanup:$(NC)'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E 'clean-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2}'
@@ -561,13 +568,55 @@ status: ## Show cluster and pod status
 
 ##@ Docker Compose
 
-.PHONY: compose-build
-compose-build: ## Build Docker image with BuildKit caching
-	@echo "$(CYAN)Building Docker image with BuildKit...$(NC)"
-	@DOCKER_BUILDKIT=1 docker build -t $(IMAGE_NAME):$(IMAGE_TAG_CURRENT) -t $(IMAGE_NAME):latest .
-	@echo "$(GREEN)✓ Image built and tagged as:$(NC)"
+.PHONY: build
+build: build-init-buildx build-fast ## Build Docker image (uses local cache by default)
+	@echo "$(GREEN)✓ Build complete!$(NC)"
+
+.PHONY: build-fast
+build-fast: ## Build Docker image with local BuildKit cache (fastest for local dev)
+	@echo "$(CYAN)Building Docker image with local cache...$(NC)"
+	@mkdir -p $(BUILD_CACHE_DIR)
+	@DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker buildx build \
+		--load \
+		--cache-from=type=local,src=$(BUILD_CACHE_DIR) \
+		--cache-to=type=local,dest=$(BUILD_CACHE_DIR),mode=max \
+		-t $(IMAGE_NAME):$(IMAGE_TAG_CURRENT) \
+		-t $(IMAGE_NAME):latest \
+		.
+	@echo "$(GREEN)✓ Image built with local cache:$(NC)"
 	@echo "  - $(IMAGE_NAME):$(IMAGE_TAG_CURRENT)"
 	@echo "  - $(IMAGE_NAME):latest"
+	@echo "$(YELLOW)Cache stored in: $(BUILD_CACHE_DIR)$(NC)"
+
+.PHONY: build-registry
+build-registry: build-init-buildx ## Build with registry cache (for CI/CD pipelines)
+	@echo "$(CYAN)Building with registry cache...$(NC)"
+	@DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker buildx build \
+		--push \
+		--cache-from=type=registry,ref=$(IMAGE_NAME):buildcache \
+		--cache-to=type=registry,ref=$(IMAGE_NAME):buildcache,mode=max \
+		-t $(IMAGE_NAME):$(IMAGE_TAG_CURRENT) \
+		-t $(IMAGE_NAME):latest \
+		.
+	@echo "$(GREEN)✓ Image built and pushed with registry cache:$(NC)"
+	@echo "  - $(IMAGE_NAME):$(IMAGE_TAG_CURRENT)"
+	@echo "  - $(IMAGE_NAME):latest"
+
+.PHONY: build-no-cache
+build-no-cache: ## Build Docker image without using cache (clean rebuild)
+	@echo "$(CYAN)Building Docker image without cache...$(NC)"
+	@DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker buildx build \
+		--load \
+		--no-cache \
+		-t $(IMAGE_NAME):$(IMAGE_TAG_CURRENT) \
+		-t $(IMAGE_NAME):latest \
+		.
+	@echo "$(GREEN)✓ Clean image built:$(NC)"
+	@echo "  - $(IMAGE_NAME):$(IMAGE_TAG_CURRENT)"
+	@echo "  - $(IMAGE_NAME):latest"
+
+.PHONY: compose-build
+compose-build: build ## Alias for 'build' target (BuildKit cached build)
 
 .PHONY: compose-up
 compose-up: ## Start Docker Compose services
@@ -595,6 +644,41 @@ compose-logs: ## View Docker Compose logs
 
 .PHONY: compose-restart
 compose-restart: compose-down compose-up ## Restart Docker Compose services
+
+##@ Docker Build Performance
+
+.PHONY: build-prune
+build-prune: ## Prune old Docker build cache
+	@echo "$(CYAN)Pruning Docker build cache...$(NC)"
+	@docker builder prune -f
+	@echo "$(GREEN)✓ Build cache pruned$(NC)"
+
+.PHONY: build-show-cache
+build-show-cache: ## Show Docker build cache information
+	@echo "$(CYAN)Docker build cache status:$(NC)"
+	@docker buildx du || (echo "$(YELLOW)BuildKit not initialized$(NC)" && false)
+
+.PHONY: build-init-buildx
+build-init-buildx: ## Initialize BuildKit builder for multi-platform builds
+	@echo "$(CYAN)Initializing BuildKit builder...$(NC)"
+	@docker buildx create --name irdb-builder --driver docker-container --use 2>/dev/null || \
+		docker buildx use irdb-builder 2>/dev/null
+	@docker buildx inspect --bootstrap >/dev/null 2>&1
+	@echo "$(GREEN)✓ BuildKit builder ready$(NC)"
+
+.PHONY: build-info
+build-info: ## Show Docker and BuildKit information
+	@echo "$(CYAN)Docker Build Information:$(NC)"
+	@echo "  Docker Version: $$(docker --version)"
+	@echo "  BuildKit Enabled: $(DOCKER_BUILDKIT)"
+	@echo "  Build Progress: $(BUILDKIT_PROGRESS)"
+	@echo "  Cache Location: $(BUILD_CACHE_DIR)"
+	@echo ""
+	@echo "$(CYAN)Available build targets:$(NC)"
+	@echo "  make build            - Local cache (recommended for local dev)"
+	@echo "  make build-fast       - Explicit local cache build"
+	@echo "  make build-registry   - Registry cache (for CI/CD with registry access)"
+	@echo "  make build-no-cache   - Clean rebuild without any cache"
 
 ##@ Cleanup
 
