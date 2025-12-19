@@ -295,14 +295,22 @@ mod tests {
     fn test_clear_filters_logic() {
         // Test the logic used in on_clear_filters
         let mut selected_categories = vec!["Electronics".to_string()];
-        let mut price_min = Some(10.0);
-        let mut price_max = Some(100.0);
-        let mut min_rating = Some(4.0);
+        let mut price_min: Option<f64> = Some(10.0);
+        let mut price_max: Option<f64> = Some(100.0);
+        let mut min_rating: Option<f64> = Some(4.0);
         let mut in_stock_only = true;
         let mut current_page = 5u32;
 
+        // Verify initial state
+        assert!(!selected_categories.is_empty());
+        assert!(price_min.is_some());
+        assert!(price_max.is_some());
+        assert!(min_rating.is_some());
+        assert!(in_stock_only);
+        assert_eq!(current_page, 5);
+
         // Clear
-        selected_categories = vec![];
+        selected_categories.clear();
         price_min = None;
         price_max = None;
         min_rating = None;
@@ -338,6 +346,7 @@ mod tests {
     fn test_page_reset_on_search() {
         // Test that page resets to 0 on new search
         let mut current_page = 5u32;
+        assert_eq!(current_page, 5);
         // Simulate new search
         current_page = 0;
         assert_eq!(current_page, 0);
@@ -359,6 +368,7 @@ mod tests {
     fn test_selected_product_id_toggle() {
         // Test the product selection logic
         let mut selected_product_id: Option<i32> = None;
+        assert!(selected_product_id.is_none());
 
         // Select a product
         selected_product_id = Some(42);

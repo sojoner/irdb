@@ -133,6 +133,12 @@ path = "tests/server_fn_tests.rs"
 harness = true
 required-features = ["ssr"]
 
+[[test]]
+name = "component_render_tests"
+path = "tests/component_render_tests.rs"
+harness = true
+required-features = ["ssr"]
+
 [[bin]]
 name = "connection_test"
 path = "src/bin/connection_test.rs"

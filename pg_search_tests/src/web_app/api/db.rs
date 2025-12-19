@@ -142,10 +142,10 @@ mod tests {
         }
 
         if let Ok(pool) = create_pool().await {
-            // Verify pool has connections available
+            // Verify pool was created successfully and has a defined size
             let size = pool.size();
-            // Size should be >= 0 (pool manages connections lazily)
-            assert!(size >= 0);
+            // Pool size should be a valid number (u32 is always non-negative)
+            assert!(size < u32::MAX, "Pool size should be a reasonable value");
         }
     }
 
