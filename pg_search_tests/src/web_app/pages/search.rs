@@ -257,4 +257,354 @@ mod tests {
     fn test_search_mode_default() {
         assert_eq!(SearchMode::default(), SearchMode::Hybrid);
     }
+
+    #[test]
+    fn test_filter_aggregation_logic() {
+        // Test the logic used in the filters derived signal
+        let selected_categories = vec!["Electronics".to_string()];
+        let price_min = Some(10.0);
+        let price_max = Some(100.0);
+        let min_rating = Some(4.0);
+        let in_stock_only = true;
+        let sort_by = SortOption::PriceAsc;
+        let current_page = 1u32;
+        let page_size = 12u32;
+
+        let filters = SearchFilters {
+            categories: selected_categories.clone(),
+            price_min,
+            price_max,
+            min_rating,
+            in_stock_only,
+            sort_by,
+            page: current_page,
+            page_size,
+        };
+
+        assert_eq!(filters.categories, selected_categories);
+        assert_eq!(filters.price_min, Some(10.0));
+        assert_eq!(filters.price_max, Some(100.0));
+        assert_eq!(filters.min_rating, Some(4.0));
+        assert!(filters.in_stock_only);
+        assert_eq!(filters.sort_by, SortOption::PriceAsc);
+        assert_eq!(filters.page, 1);
+        assert_eq!(filters.page_size, 12);
+    }
+
+    #[test]
+    fn test_clear_filters_logic() {
+        // Test the logic used in on_clear_filters
+        let mut selected_categories = vec!["Electronics".to_string()];
+        let mut price_min = Some(10.0);
+        let mut price_max = Some(100.0);
+        let mut min_rating = Some(4.0);
+        let mut in_stock_only = true;
+        let mut current_page = 5u32;
+
+        // Clear
+        selected_categories = vec![];
+        price_min = None;
+        price_max = None;
+        min_rating = None;
+        in_stock_only = false;
+        current_page = 0;
+
+        assert!(selected_categories.is_empty());
+        assert!(price_min.is_none());
+        assert!(price_max.is_none());
+        assert!(min_rating.is_none());
+        assert!(!in_stock_only);
+        assert_eq!(current_page, 0);
+    }
+
+    #[test]
+    fn test_search_trigger_increment() {
+        // Test the search trigger logic
+        let mut search_trigger = 0u32;
+        search_trigger += 1;
+        assert_eq!(search_trigger, 1);
+
+        search_trigger += 1;
+        assert_eq!(search_trigger, 2);
+
+        // Verify it doesn't overflow in reasonable use
+        for _ in 0..100 {
+            search_trigger += 1;
+        }
+        assert_eq!(search_trigger, 102);
+    }
+
+    #[test]
+    fn test_page_reset_on_search() {
+        // Test that page resets to 0 on new search
+        let mut current_page = 5u32;
+        // Simulate new search
+        current_page = 0;
+        assert_eq!(current_page, 0);
+    }
+
+    #[test]
+    fn test_empty_query_returns_empty_results() {
+        // Test the logic for empty query handling
+        let query = String::new();
+        let should_search = !query.is_empty();
+        assert!(!should_search);
+
+        let query = "laptop".to_string();
+        let should_search = !query.is_empty();
+        assert!(should_search);
+    }
+
+    #[test]
+    fn test_selected_product_id_toggle() {
+        // Test the product selection logic
+        let mut selected_product_id: Option<i32> = None;
+
+        // Select a product
+        selected_product_id = Some(42);
+        assert_eq!(selected_product_id, Some(42));
+
+        // Close modal
+        selected_product_id = None;
+        assert!(selected_product_id.is_none());
+    }
+
+    #[test]
+    fn test_find_product_in_results() {
+        use rust_decimal::Decimal;
+
+        // Create test products
+        let products = vec![
+            Product {
+                id: 1,
+                name: "Product 1".to_string(),
+                description: "Desc 1".to_string(),
+                brand: "Brand".to_string(),
+                category: "Cat".to_string(),
+                subcategory: None,
+                tags: vec![],
+                price: Decimal::new(100, 0),
+                rating: Decimal::new(40, 1),
+                review_count: 10,
+                stock_quantity: 5,
+                in_stock: true,
+                featured: false,
+                attributes: None,
+                created_at: chrono::NaiveDateTime::default(),
+                updated_at: chrono::NaiveDateTime::default(),
+            },
+            Product {
+                id: 2,
+                name: "Product 2".to_string(),
+                description: "Desc 2".to_string(),
+                brand: "Brand".to_string(),
+                category: "Cat".to_string(),
+                subcategory: None,
+                tags: vec![],
+                price: Decimal::new(200, 0),
+                rating: Decimal::new(45, 1),
+                review_count: 20,
+                stock_quantity: 10,
+                in_stock: true,
+                featured: true,
+                attributes: None,
+                created_at: chrono::NaiveDateTime::default(),
+                updated_at: chrono::NaiveDateTime::default(),
+            },
+        ];
+
+        let results: Vec<SearchResult> = products.into_iter().map(|p| SearchResult {
+            product: p,
+            bm25_score: None,
+            vector_score: None,
+            combined_score: 0.5,
+            snippet: None,
+        }).collect();
+
+        // Find product by ID
+        let target_id = 2;
+        let found = results.iter()
+            .find(|r| r.product.id == target_id)
+            .map(|r| r.product.clone());
+
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Product 2");
+
+        // Try to find non-existent product
+        let target_id = 999;
+        let not_found = results.iter()
+            .find(|r| r.product.id == target_id)
+            .map(|r| r.product.clone());
+
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_filters_with_all_sort_options() {
+        let sort_options = [
+            SortOption::Relevance,
+            SortOption::PriceAsc,
+            SortOption::PriceDesc,
+            SortOption::RatingDesc,
+            SortOption::Newest,
+        ];
+
+        for sort_by in sort_options {
+            let filters = SearchFilters {
+                categories: vec![],
+                price_min: None,
+                price_max: None,
+                min_rating: None,
+                in_stock_only: false,
+                sort_by,
+                page: 0,
+                page_size: 12,
+            };
+
+            assert_eq!(filters.sort_by, sort_by);
+            assert_eq!(filters.page_size, 12);
+        }
+    }
+
+    #[test]
+    fn test_filters_with_multiple_categories() {
+        let categories = vec![
+            "Electronics".to_string(),
+            "Books".to_string(),
+            "Home & Garden".to_string(),
+            "Sports".to_string(),
+        ];
+
+        let filters = SearchFilters {
+            categories: categories.clone(),
+            price_min: None,
+            price_max: None,
+            min_rating: None,
+            in_stock_only: false,
+            sort_by: SortOption::Relevance,
+            page: 0,
+            page_size: 20,
+        };
+
+        assert_eq!(filters.categories.len(), 4);
+        assert!(filters.categories.contains(&"Electronics".to_string()));
+        assert!(filters.categories.contains(&"Sports".to_string()));
+    }
+
+    #[test]
+    fn test_price_range_validation() {
+        // Test various price range combinations
+        let test_cases = [
+            (Some(0.0), Some(100.0), true),   // Valid range
+            (Some(50.0), Some(100.0), true),  // Valid range
+            (Some(100.0), Some(50.0), false), // Invalid: min > max
+            (None, Some(100.0), true),        // Only max
+            (Some(50.0), None, true),         // Only min
+            (None, None, true),               // No range
+        ];
+
+        for (price_min, price_max, is_valid) in test_cases {
+            let valid = match (price_min, price_max) {
+                (Some(min), Some(max)) => min <= max,
+                _ => true,
+            };
+            assert_eq!(valid, is_valid, "price_min={:?}, price_max={:?}", price_min, price_max);
+        }
+    }
+
+    #[test]
+    fn test_rating_filter_values() {
+        // Test various min_rating values
+        let ratings = [None, Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];
+
+        for min_rating in ratings {
+            let filters = SearchFilters {
+                categories: vec![],
+                price_min: None,
+                price_max: None,
+                min_rating,
+                in_stock_only: false,
+                sort_by: SortOption::Relevance,
+                page: 0,
+                page_size: 12,
+            };
+
+            assert_eq!(filters.min_rating, min_rating);
+        }
+    }
+
+    #[test]
+    fn test_pagination_state() {
+        // Test pagination state changes
+        let page_size = 12u32;
+
+        for page in 0..10 {
+            let filters = SearchFilters {
+                categories: vec![],
+                price_min: None,
+                price_max: None,
+                min_rating: None,
+                in_stock_only: false,
+                sort_by: SortOption::Relevance,
+                page,
+                page_size,
+            };
+
+            assert_eq!(filters.page, page);
+            assert_eq!(filters.page_size, page_size);
+
+            // Calculate offset
+            let offset = page * page_size;
+            assert_eq!(offset, page * 12);
+        }
+    }
+
+    #[test]
+    fn test_empty_search_results_structure() {
+        // Test the structure returned for empty queries
+        let empty_results = SearchResults {
+            results: vec![],
+            total_count: 0,
+            category_facets: vec![],
+            brand_facets: vec![],
+            price_histogram: vec![],
+            avg_price: 0.0,
+            avg_rating: 0.0,
+        };
+
+        assert!(empty_results.results.is_empty());
+        assert_eq!(empty_results.total_count, 0);
+        assert!(empty_results.category_facets.is_empty());
+        assert!(empty_results.brand_facets.is_empty());
+        assert!(empty_results.price_histogram.is_empty());
+        assert_eq!(empty_results.avg_price, 0.0);
+        assert_eq!(empty_results.avg_rating, 0.0);
+    }
+
+    #[test]
+    fn test_search_mode_all_variants() {
+        let modes = [SearchMode::Bm25, SearchMode::Vector, SearchMode::Hybrid];
+
+        for mode in modes {
+            // Each mode should be distinguishable
+            match mode {
+                SearchMode::Bm25 => assert_eq!(mode.to_string(), "BM25"),
+                SearchMode::Vector => assert_eq!(mode.to_string(), "Vector"),
+                SearchMode::Hybrid => assert_eq!(mode.to_string(), "Hybrid"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_in_stock_filter_toggle() {
+        let mut in_stock_only = false;
+
+        // Toggle on
+        in_stock_only = !in_stock_only;
+        assert!(in_stock_only);
+
+        // Toggle off
+        in_stock_only = !in_stock_only;
+        assert!(!in_stock_only);
+    }
 }

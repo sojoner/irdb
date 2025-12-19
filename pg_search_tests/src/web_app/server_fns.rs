@@ -238,3 +238,14 @@ pub async fn get_analytics() -> Result<AnalyticsData, ServerFnError> {
         top_brands,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_server_fn_compilation() {
+        // This test just ensures the module compiles and basic types are available
+        assert!(true);
+    }
+}

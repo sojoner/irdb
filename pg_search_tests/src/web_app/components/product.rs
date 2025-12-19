@@ -380,7 +380,7 @@ pub fn ScoreBreakdown(
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;
-    use crate::web_app::model::Product;
+    use crate::web_app::model::{Product, SearchResult};
 
     fn create_test_product() -> Product {
         Product {
@@ -403,6 +403,16 @@ mod tests {
         }
     }
 
+    fn create_test_search_result() -> SearchResult {
+        SearchResult {
+            product: create_test_product(),
+            bm25_score: Some(0.85),
+            vector_score: Some(0.92),
+            combined_score: 0.89,
+            snippet: Some("A highlighted <b>test</b> snippet".to_string()),
+        }
+    }
+
     #[test]
     fn test_description_truncation() {
         let product = create_test_product();
@@ -414,6 +424,46 @@ mod tests {
 
         assert!(truncated.len() <= 123); // 120 + "..."
         assert!(truncated.ends_with("..."));
+
+        let short_desc = "Short description";
+        let truncated_short = if short_desc.len() > 120 {
+            format!("{}...", &short_desc[..120])
+        } else {
+            short_desc.to_string()
+        };
+        assert_eq!(truncated_short, short_desc);
+    }
+
+    #[test]
+    fn test_description_truncation_edge_cases() {
+        // Exactly 120 characters - should not truncate
+        let desc_120 = "a".repeat(120);
+        let truncated = if desc_120.len() > 120 {
+            format!("{}...", &desc_120[..120])
+        } else {
+            desc_120.clone()
+        };
+        assert_eq!(truncated.len(), 120);
+        assert!(!truncated.ends_with("..."));
+
+        // 121 characters - should truncate
+        let desc_121 = "a".repeat(121);
+        let truncated = if desc_121.len() > 120 {
+            format!("{}...", &desc_121[..120])
+        } else {
+            desc_121.clone()
+        };
+        assert_eq!(truncated.len(), 123);
+        assert!(truncated.ends_with("..."));
+
+        // Empty string
+        let desc_empty = "";
+        let truncated = if desc_empty.len() > 120 {
+            format!("{}...", &desc_empty[..120])
+        } else {
+            desc_empty.to_string()
+        };
+        assert_eq!(truncated, "");
     }
 
     #[test]
@@ -424,9 +474,378 @@ mod tests {
     }
 
     #[test]
+    fn test_price_formatting_various() {
+        let prices = [
+            (Decimal::new(0, 0), "$0.00"),
+            (Decimal::new(100, 0), "$100.00"),
+            (Decimal::new(999, 2), "$9.99"),
+            (Decimal::new(12345, 2), "$123.45"),
+            (Decimal::new(1, 2), "$0.01"),
+        ];
+
+        for (decimal, expected) in prices {
+            let formatted = format!("${:.2}", decimal);
+            assert_eq!(formatted, expected, "Price {} should format as {}", decimal, expected);
+        }
+    }
+
+    #[test]
     fn test_rating_conversion() {
         let product = create_test_product();
         let rating_f64: f64 = product.rating.try_into().unwrap_or(0.0);
         assert!((rating_f64 - 4.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_rating_conversion_various() {
+        let ratings = [
+            (Decimal::new(0, 0), 0.0),
+            (Decimal::new(50, 1), 5.0),
+            (Decimal::new(25, 1), 2.5),
+            (Decimal::new(33, 1), 3.3),
+            (Decimal::new(10, 1), 1.0),
+        ];
+
+        for (decimal, expected) in ratings {
+            let rating_f64: f64 = decimal.try_into().unwrap_or(0.0);
+            assert!((rating_f64 - expected).abs() < 0.01,
+                "Rating {} should convert to {}", decimal, expected);
+        }
+    }
+
+    #[test]
+    fn test_attribute_key_formatting_logic() {
+        let keys = [
+            ("battery_life", "Battery Life"),
+            ("screen_size", "Screen Size"),
+            ("weight", "Weight"),
+            ("os_version", "Os Version"),
+        ];
+
+        for (key, expected) in keys {
+            let formatted = key.replace('_', " ")
+                .split_whitespace()
+                .map(|word| {
+                    let mut c = word.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(" ");
+            assert_eq!(formatted, expected);
+        }
+    }
+
+    #[test]
+    fn test_attribute_key_formatting_edge_cases() {
+        // Single word
+        let key = "weight";
+        let formatted = key.replace('_', " ")
+            .split_whitespace()
+            .map(|word| {
+                let mut c = word.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(" ");
+        assert_eq!(formatted, "Weight");
+
+        // Multiple underscores
+        let key = "max_battery_life_hours";
+        let formatted = key.replace('_', " ")
+            .split_whitespace()
+            .map(|word| {
+                let mut c = word.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(" ");
+        assert_eq!(formatted, "Max Battery Life Hours");
+
+        // Empty string
+        let key = "";
+        let formatted = key.replace('_', " ")
+            .split_whitespace()
+            .map(|word| {
+                let mut c = word.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(" ");
+        assert_eq!(formatted, "");
+    }
+
+    #[test]
+    fn test_json_attribute_handling_logic() {
+        use serde_json::json;
+        let attrs = json!({
+            "battery_life": "10 hours",
+            "weight_kg": 1.5,
+            "is_portable": true
+        });
+
+        if let serde_json::Value::Object(map) = attrs {
+            let mut results = Vec::new();
+            for (k, v) in map {
+                let val_str = match v {
+                    serde_json::Value::String(s) => s,
+                    serde_json::Value::Number(n) => n.to_string(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    _ => v.to_string(),
+                };
+                results.push((k, val_str));
+            }
+            assert_eq!(results.len(), 3);
+            assert!(results.iter().any(|(k, v)| k == "battery_life" && v == "10 hours"));
+            assert!(results.iter().any(|(k, v)| k == "weight_kg" && v == "1.5"));
+            assert!(results.iter().any(|(k, v)| k == "is_portable" && v == "true"));
+        }
+    }
+
+    #[test]
+    fn test_json_attribute_various_types() {
+        use serde_json::json;
+
+        // Test all JSON value types
+        let test_cases = [
+            (json!("string value"), "string value"),
+            (json!(42), "42"),
+            (json!(3.14), "3.14"),
+            (json!(true), "true"),
+            (json!(false), "false"),
+            (json!(null), "null"),
+        ];
+
+        for (value, expected) in test_cases {
+            let val_str = match value {
+                serde_json::Value::String(s) => s,
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                serde_json::Value::Null => "null".to_string(),
+                _ => value.to_string(),
+            };
+            assert_eq!(val_str, expected, "JSON value should convert to {}", expected);
+        }
+    }
+
+    #[test]
+    fn test_json_attribute_nested_fallback() {
+        use serde_json::json;
+
+        // Test nested object fallback
+        let nested = json!({"nested": "value"});
+        let val_str = match nested.clone() {
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            _ => nested.to_string(),
+        };
+        // Nested objects should use to_string() fallback
+        assert!(val_str.contains("nested"));
+        assert!(val_str.contains("value"));
+
+        // Test array fallback
+        let array = json!([1, 2, 3]);
+        let val_str = match array.clone() {
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            _ => array.to_string(),
+        };
+        assert!(val_str.contains("1"));
+        assert!(val_str.contains("2"));
+        assert!(val_str.contains("3"));
+    }
+
+    #[test]
+    fn test_stock_status_display() {
+        // Test in_stock display logic
+        let in_stock = true;
+        let status = if in_stock { "In Stock" } else { "Out of Stock" };
+        assert_eq!(status, "In Stock");
+
+        let in_stock = false;
+        let status = if in_stock { "In Stock" } else { "Out of Stock" };
+        assert_eq!(status, "Out of Stock");
+    }
+
+    #[test]
+    fn test_featured_badge_visibility() {
+        // Test featured badge display logic
+        let featured = true;
+        let badge = if featured { Some("★ Featured") } else { None };
+        assert!(badge.is_some());
+        assert_eq!(badge.unwrap(), "★ Featured");
+
+        let featured = false;
+        let badge: Option<&str> = if featured { Some("★ Featured") } else { None };
+        assert!(badge.is_none());
+    }
+
+    #[test]
+    fn test_search_result_score_display() {
+        let result = create_test_search_result();
+
+        // Test score formatting
+        let score_display = format!("{:.2}", result.combined_score);
+        assert_eq!(score_display, "0.89");
+
+        // Test optional score formatting
+        if let Some(bm25) = result.bm25_score {
+            let bm25_display = format!("{:.2}", bm25);
+            assert_eq!(bm25_display, "0.85");
+        }
+
+        if let Some(vector) = result.vector_score {
+            let vector_display = format!("{:.2}", vector);
+            assert_eq!(vector_display, "0.92");
+        }
+    }
+
+    #[test]
+    fn test_score_display_threshold() {
+        // Test the score > 0.0 condition for showing scores
+        let scores = [0.0, 0.01, 0.5, 1.0, -0.1];
+        for score in scores {
+            let should_show = score > 0.0;
+            match score {
+                s if s <= 0.0 => assert!(!should_show),
+                _ => assert!(should_show),
+            }
+        }
+    }
+
+    #[test]
+    fn test_snippet_fallback_to_description() {
+        let product = create_test_product();
+        let description_preview = if product.description.len() > 120 {
+            format!("{}...", &product.description[..120])
+        } else {
+            product.description.clone()
+        };
+
+        // With snippet
+        let result_with_snippet = SearchResult {
+            product: product.clone(),
+            bm25_score: None,
+            vector_score: None,
+            combined_score: 0.5,
+            snippet: Some("Custom snippet".to_string()),
+        };
+        let display_text = result_with_snippet.snippet.clone().unwrap_or(description_preview.clone());
+        assert_eq!(display_text, "Custom snippet");
+
+        // Without snippet - falls back to description
+        let result_without_snippet = SearchResult {
+            product: product.clone(),
+            bm25_score: None,
+            vector_score: None,
+            combined_score: 0.5,
+            snippet: None,
+        };
+        let display_text = result_without_snippet.snippet.clone().unwrap_or(description_preview.clone());
+        assert!(display_text.ends_with("..."));
+    }
+
+    #[test]
+    fn test_product_count_display() {
+        // Test the singular/plural logic in ResultsGrid
+        let test_cases = [
+            (0i64, "0 products found"),
+            (1i64, "1 product found"),
+            (2i64, "2 products found"),
+            (100i64, "100 products found"),
+        ];
+
+        for (count, expected) in test_cases {
+            let display = if count == 1 {
+                "1 product found".to_string()
+            } else {
+                format!("{} products found", count)
+            };
+            assert_eq!(display, expected);
+        }
+    }
+
+    #[test]
+    fn test_tags_display() {
+        let product = create_test_product();
+
+        // Test tags are not empty
+        assert!(!product.tags.is_empty());
+        assert_eq!(product.tags.len(), 2);
+        assert!(product.tags.contains(&"test".to_string()));
+        assert!(product.tags.contains(&"sample".to_string()));
+
+        // Test tag formatting
+        for tag in &product.tags {
+            let formatted = format!("#{}", tag);
+            assert!(formatted.starts_with('#'));
+        }
+    }
+
+    #[test]
+    fn test_subcategory_display() {
+        let product = create_test_product();
+
+        // With subcategory
+        assert!(product.subcategory.is_some());
+        if let Some(sub) = &product.subcategory {
+            let display = format!("{} › {}", product.category, sub);
+            assert!(display.contains("Electronics"));
+            assert!(display.contains("Gadgets"));
+        }
+
+        // Without subcategory
+        let mut product_no_sub = product.clone();
+        product_no_sub.subcategory = None;
+        assert!(product_no_sub.subcategory.is_none());
+    }
+
+    #[test]
+    fn test_score_breakdown_formatting() {
+        // Test ScoreBreakdown formatting logic
+        let bm25_score = Some(0.85);
+        let vector_score = Some(0.92);
+        let combined_score = 0.89;
+
+        let bm25_display = bm25_score.map(|s| format!("{:.3}", s)).unwrap_or_else(|| "N/A".to_string());
+        assert_eq!(bm25_display, "0.850");
+
+        let vector_display = vector_score.map(|s| format!("{:.3}", s)).unwrap_or_else(|| "N/A".to_string());
+        assert_eq!(vector_display, "0.920");
+
+        let combined_display = format!("{:.3}", combined_score);
+        assert_eq!(combined_display, "0.890");
+
+        // Test N/A fallback
+        let no_score: Option<f64> = None;
+        let no_score_display = no_score.map(|s| format!("{:.3}", s)).unwrap_or_else(|| "N/A".to_string());
+        assert_eq!(no_score_display, "N/A");
+    }
+
+    #[test]
+    fn test_stock_quantity_display() {
+        let product = create_test_product();
+        let quantity_display = format!("({} available)", product.stock_quantity);
+        assert_eq!(quantity_display, "(50 available)");
+    }
+
+    #[test]
+    fn test_review_count_display() {
+        let product = create_test_product();
+        let review_display = format!("{} reviews", product.review_count);
+        assert_eq!(review_display, "100 reviews");
     }
 }

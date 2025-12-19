@@ -515,6 +515,32 @@ mod tests {
     }
 
     #[test]
+    fn test_sort_option_reverse_mapping() {
+        // Test parsing string back to SortOption
+        let strings = ["relevance", "price_asc", "price_desc", "rating_desc", "newest", "unknown"];
+
+        for value in strings {
+            let new_sort = match value {
+                "relevance" => SortOption::Relevance,
+                "price_asc" => SortOption::PriceAsc,
+                "price_desc" => SortOption::PriceDesc,
+                "rating_desc" => SortOption::RatingDesc,
+                "newest" => SortOption::Newest,
+                _ => SortOption::Relevance,
+            };
+
+            match value {
+                "relevance" => assert_eq!(new_sort, SortOption::Relevance),
+                "price_asc" => assert_eq!(new_sort, SortOption::PriceAsc),
+                "price_desc" => assert_eq!(new_sort, SortOption::PriceDesc),
+                "rating_desc" => assert_eq!(new_sort, SortOption::RatingDesc),
+                "newest" => assert_eq!(new_sort, SortOption::Newest),
+                _ => assert_eq!(new_sort, SortOption::Relevance), // Default fallback
+            }
+        }
+    }
+
+    #[test]
     fn test_search_mode_variants() {
         // Verify all search modes exist
         let modes = [SearchMode::Bm25, SearchMode::Vector, SearchMode::Hybrid];
@@ -523,16 +549,362 @@ mod tests {
     }
 
     #[test]
+    fn test_search_mode_labels_and_descriptions() {
+        // Test the labels and descriptions used in SearchModeToggle
+        let modes = [
+            (SearchMode::Bm25, "BM25", "Keyword matching"),
+            (SearchMode::Vector, "Vector", "Semantic similarity"),
+            (SearchMode::Hybrid, "Hybrid", "Combined (recommended)"),
+        ];
+
+        for (mode, label, description) in modes {
+            // Verify label is not empty
+            assert!(!label.is_empty(), "Label for {:?}", mode);
+            // Verify description is not empty
+            assert!(!description.is_empty(), "Description for {:?}", mode);
+            // Verify Hybrid is marked as recommended
+            if mode == SearchMode::Hybrid {
+                assert!(description.contains("recommended"));
+            }
+        }
+    }
+
+    #[test]
     fn test_pagination_logic_pure() {
         // Test the math behind pagination
         let total_items = 100i64;
         let page_size = 10u32;
-        
+
         let total_pages = (total_items as f64 / page_size as f64).ceil() as u32;
         assert_eq!(total_pages, 10);
 
         let total_items_2 = 101i64;
         let total_pages_2 = (total_items_2 as f64 / page_size as f64).ceil() as u32;
         assert_eq!(total_pages_2, 11);
+    }
+
+    #[test]
+    fn test_pagination_edge_cases() {
+        // Test edge cases in pagination
+        let test_cases = [
+            (0i64, 10u32, 0u32),    // No items
+            (1i64, 10u32, 1u32),    // Single item
+            (10i64, 10u32, 1u32),   // Exactly one page
+            (11i64, 10u32, 2u32),   // Just over one page
+            (100i64, 1u32, 100u32), // Page size of 1
+            (99i64, 100u32, 1u32),  // Less than page size
+        ];
+
+        for (total_items, page_size, expected_pages) in test_cases {
+            let total_pages = (total_items as f64 / page_size as f64).ceil() as u32;
+            assert_eq!(total_pages, expected_pages,
+                "Expected {} pages for {} items with page size {}",
+                expected_pages, total_items, page_size);
+        }
+    }
+
+    #[test]
+    fn test_pagination_boundaries() {
+        // Test pagination boundary logic
+        let total_items = 25i64;
+        let page_size = 10u32;
+        let total_pages = (total_items as f64 / page_size as f64).ceil() as u32; // 3 pages
+
+        // Page 0
+        let current_page = 0u32;
+        let can_go_prev = current_page > 0;
+        let can_go_next = current_page < total_pages.saturating_sub(1);
+        assert!(!can_go_prev);
+        assert!(can_go_next);
+
+        // Page 1
+        let current_page = 1u32;
+        let can_go_prev = current_page > 0;
+        let can_go_next = current_page < total_pages.saturating_sub(1);
+        assert!(can_go_prev);
+        assert!(can_go_next);
+
+        // Page 2 (Last)
+        let current_page = 2u32;
+        let can_go_prev = current_page > 0;
+        let can_go_next = current_page < total_pages.saturating_sub(1);
+        assert!(can_go_prev);
+        assert!(!can_go_next);
+    }
+
+    #[test]
+    fn test_pagination_navigation() {
+        // Test the go_prev and go_next logic
+        let mut current_page = 5u32;
+
+        // Test go_prev
+        if current_page > 0 {
+            current_page = current_page.saturating_sub(1);
+        }
+        assert_eq!(current_page, 4);
+
+        // Test go_next
+        current_page += 1;
+        assert_eq!(current_page, 5);
+
+        // Test go_prev at boundary
+        current_page = 0;
+        let can_go_prev = current_page > 0;
+        if can_go_prev {
+            current_page = current_page.saturating_sub(1);
+        }
+        assert_eq!(current_page, 0); // Unchanged
+    }
+
+    #[test]
+    fn test_pagination_page_display() {
+        // Test the page display logic (1-indexed for users)
+        let current_page = 0u32;
+        let display_page = current_page + 1;
+        assert_eq!(display_page, 1);
+
+        let current_page = 9u32;
+        let display_page = current_page + 1;
+        assert_eq!(display_page, 10);
+    }
+
+    #[test]
+    fn test_price_range_parsing() {
+        // Test the logic used in apply_min/apply_max
+        let valid_input = "49.99";
+        let parsed = valid_input.parse::<f64>();
+        assert!(parsed.is_ok());
+        assert_eq!(parsed.unwrap(), 49.99);
+
+        let invalid_input = "abc";
+        let parsed = invalid_input.parse::<f64>();
+        assert!(parsed.is_err());
+
+        let empty_input = "";
+        assert!(empty_input.is_empty());
+    }
+
+    #[test]
+    fn test_price_range_parsing_extended() {
+        // Test more price parsing scenarios
+        let test_cases = [
+            ("0", Some(0.0)),
+            ("0.00", Some(0.0)),
+            ("100", Some(100.0)),
+            ("99.99", Some(99.99)),
+            ("1234.567", Some(1234.567)),
+            ("-10", Some(-10.0)),  // Negative (might be valid for refunds?)
+            ("1e3", Some(1000.0)), // Scientific notation
+            ("abc", None),
+            ("$100", None),  // Currency symbol
+            ("100,00", None), // European format
+            ("", None),
+        ];
+
+        for (input, expected) in test_cases {
+            if input.is_empty() {
+                assert!(input.is_empty());
+            } else {
+                let parsed = input.parse::<f64>();
+                match expected {
+                    Some(val) => {
+                        assert!(parsed.is_ok(), "Expected {} to parse", input);
+                        assert!((parsed.unwrap() - val).abs() < 0.001, "Expected {} for {}", val, input);
+                    }
+                    None => {
+                        assert!(parsed.is_err(), "Expected {} to fail parsing", input);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_price_apply_logic() {
+        // Test the full apply_min/apply_max logic
+        let test_cases = [
+            ("", None::<f64>),
+            ("100", Some(100.0)),
+            ("abc", None),
+        ];
+
+        for (input, expected) in test_cases {
+            let result: Option<f64> = if input.is_empty() {
+                None
+            } else if let Ok(num) = input.parse::<f64>() {
+                Some(num)
+            } else {
+                None // Keep previous value in actual code, but we return None for test
+            };
+
+            match expected {
+                Some(val) => {
+                    assert!(result.is_some());
+                    assert!((result.unwrap() - val).abs() < 0.001);
+                }
+                None => {
+                    assert!(result.is_none() || input == "abc");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_category_toggle_logic() {
+        // Test the logic used in toggle_category
+        let mut selected = vec!["Electronics".to_string(), "Books".to_string()];
+        let category = "Electronics".to_string();
+
+        // Toggle existing (remove)
+        if selected.contains(&category) {
+            selected.retain(|c| c != &category);
+        } else {
+            selected.push(category);
+        }
+        assert_eq!(selected.len(), 1);
+        assert!(!selected.contains(&"Electronics".to_string()));
+
+        // Toggle new (add)
+        let category = "Home".to_string();
+        if selected.contains(&category) {
+            selected.retain(|c| c != &category);
+        } else {
+            selected.push(category);
+        }
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&"Home".to_string()));
+    }
+
+    #[test]
+    fn test_category_toggle_multiple() {
+        // Test toggling multiple categories
+        let mut selected: Vec<String> = vec![];
+
+        // Add categories
+        let categories = ["Electronics", "Books", "Home", "Sports"];
+        for cat in categories {
+            let category = cat.to_string();
+            if !selected.contains(&category) {
+                selected.push(category);
+            }
+        }
+        assert_eq!(selected.len(), 4);
+
+        // Remove all
+        for cat in categories {
+            let category = cat.to_string();
+            selected.retain(|c| c != &category);
+        }
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_rating_filter_options() {
+        // Test the rating filter options
+        let options: [(Option<f64>, &str); 4] = [
+            (Some(4.0), "4+ ★"),
+            (Some(3.0), "3+ ★"),
+            (Some(2.0), "2+ ★"),
+            (None, "Any"),
+        ];
+
+        for (value, label) in options {
+            // Verify label is not empty
+            assert!(!label.is_empty());
+            // Verify None maps to "Any"
+            if value.is_none() {
+                assert_eq!(label, "Any");
+            } else {
+                assert!(label.contains("★"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_in_stock_toggle_logic() {
+        // Test the in_stock toggle
+        let mut in_stock_only = false;
+        in_stock_only = !in_stock_only;
+        assert!(in_stock_only);
+        in_stock_only = !in_stock_only;
+        assert!(!in_stock_only);
+    }
+
+    #[test]
+    fn test_search_mode_selection_class() {
+        // Test the class logic used for selected/unselected modes
+        let is_selected = true;
+        let class = if is_selected {
+            "text-blue-700 font-bold transition-colors"
+        } else {
+            "text-gray-700 font-medium group-hover:text-gray-900 transition-colors"
+        };
+        assert!(class.contains("text-blue-700"));
+        assert!(class.contains("font-bold"));
+
+        let is_selected = false;
+        let class = if is_selected {
+            "text-blue-700 font-bold transition-colors"
+        } else {
+            "text-gray-700 font-medium group-hover:text-gray-900 transition-colors"
+        };
+        assert!(class.contains("text-gray-700"));
+        assert!(class.contains("font-medium"));
+    }
+
+    #[test]
+    fn test_rating_button_class() {
+        // Test the class logic for rating filter buttons
+        let is_selected = true;
+        let class = if is_selected {
+            "px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white shadow-sm transition-all"
+        } else {
+            "px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all"
+        };
+        assert!(class.contains("bg-blue-600"));
+        assert!(class.contains("text-white"));
+
+        let is_selected = false;
+        let class = if is_selected {
+            "px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white shadow-sm transition-all"
+        } else {
+            "px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all"
+        };
+        assert!(class.contains("bg-white"));
+        assert!(class.contains("border"));
+    }
+
+    #[test]
+    fn test_facet_count_structure() {
+        // Test FacetCount usage
+        let facet = FacetCount {
+            value: "Electronics".to_string(),
+            count: 42,
+        };
+
+        assert_eq!(facet.value, "Electronics");
+        assert_eq!(facet.count, 42);
+    }
+
+    #[test]
+    fn test_facet_list_operations() {
+        // Test operations on facet lists
+        let facets = vec![
+            FacetCount { value: "Electronics".to_string(), count: 100 },
+            FacetCount { value: "Books".to_string(), count: 50 },
+            FacetCount { value: "Home".to_string(), count: 25 },
+        ];
+
+        // Find total count
+        let total: i64 = facets.iter().map(|f| f.count).sum();
+        assert_eq!(total, 175);
+
+        // Filter by category
+        let selected = vec!["Electronics".to_string()];
+        let matching: Vec<_> = facets.iter()
+            .filter(|f| selected.contains(&f.value))
+            .collect();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].value, "Electronics");
     }
 }

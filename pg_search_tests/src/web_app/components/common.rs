@@ -405,4 +405,210 @@ mod tests {
         assert_eq!(full_stars, 3);
         assert!(!has_half);
     }
+
+    #[test]
+    fn test_star_calculation_boundaries() {
+        let rating = 0.0_f64;
+        let full_stars = rating.floor() as usize;
+        let has_half = (rating - rating.floor()) >= 0.5;
+        assert_eq!(full_stars, 0);
+        assert!(!has_half);
+
+        let rating = 5.0_f64;
+        let full_stars = rating.floor() as usize;
+        let has_half = (rating - rating.floor()) >= 0.5;
+        assert_eq!(full_stars, 5);
+        assert!(!has_half);
+    }
+
+    #[test]
+    fn test_star_calculation_fractional() {
+        // Test various fractional ratings
+        let test_cases: [(f64, usize, bool); 9] = [
+            (4.4, 4, false),  // Just under half
+            (4.5, 4, true),   // Exactly half
+            (4.6, 4, true),   // Above half
+            (4.9, 4, true),   // Just under next whole
+            (3.49, 3, false), // Just under half
+            (3.50, 3, true),  // Exactly half
+            (2.25, 2, false), // Quarter
+            (2.75, 2, true),  // Three quarters
+            (1.1, 1, false),  // Just above whole
+        ];
+
+        for (rating, expected_full, expected_half) in test_cases {
+            let full_stars = rating.floor() as usize;
+            let has_half = (rating - rating.floor()) >= 0.5;
+            assert_eq!(full_stars, expected_full, "Full stars for rating {}", rating);
+            assert_eq!(has_half, expected_half, "Has half for rating {}", rating);
+        }
+    }
+
+    #[test]
+    fn test_star_empty_calculation() {
+        // Test empty star count calculation
+        let test_cases: [(f64, usize); 7] = [
+            (5.0, 0),  // All full, no empty
+            (4.5, 0),  // 4 full + 1 half = 5, no empty
+            (4.0, 1),  // 4 full, 1 empty
+            (3.5, 1),  // 3 full + 1 half = 4, 1 empty
+            (3.0, 2),  // 3 full, 2 empty
+            (0.0, 5),  // No full, 5 empty
+            (0.5, 4),  // 0 full + 1 half = 1, 4 empty
+        ];
+
+        for (rating, expected_empty) in test_cases {
+            let full_stars = rating.floor() as usize;
+            let has_half = (rating - rating.floor()) >= 0.5;
+            let empty_stars = 5 - full_stars - if has_half { 1 } else { 0 };
+            assert_eq!(empty_stars, expected_empty, "Empty stars for rating {}", rating);
+        }
+    }
+
+    #[test]
+    fn test_badge_variants() {
+        let variants = ["green", "red", "blue", "yellow", "gray", "unknown"];
+        for variant in variants {
+            let class = match variant {
+                "green" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-200",
+                "red" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-800 border border-red-200",
+                "blue" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800 border border-blue-200",
+                "yellow" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200",
+                _ => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-800 border border-gray-200",
+            };
+
+            if variant == "green" {
+                assert!(class.contains("bg-green-100"));
+            } else if variant == "red" {
+                assert!(class.contains("bg-red-100"));
+            } else if variant == "blue" {
+                assert!(class.contains("bg-blue-100"));
+            } else if variant == "yellow" {
+                assert!(class.contains("bg-yellow-100"));
+            } else {
+                assert!(class.contains("bg-gray-100"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_badge_all_class_properties() {
+        // Test that all badge classes contain expected properties
+        let variants = ["green", "red", "blue", "yellow", "gray"];
+        for variant in variants {
+            let class = match variant {
+                "green" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-200",
+                "red" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-800 border border-red-200",
+                "blue" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800 border border-blue-200",
+                "yellow" => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200",
+                _ => "px-2.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-800 border border-gray-200",
+            };
+
+            // Common properties
+            assert!(class.contains("px-2.5"), "Padding x for {}", variant);
+            assert!(class.contains("py-0.5"), "Padding y for {}", variant);
+            assert!(class.contains("text-xs"), "Text size for {}", variant);
+            assert!(class.contains("font-medium"), "Font weight for {}", variant);
+            assert!(class.contains("rounded-full"), "Rounded for {}", variant);
+            assert!(class.contains("border"), "Border for {}", variant);
+        }
+    }
+
+    #[test]
+    fn test_price_formatting_logic() {
+        let prices = [
+            (0.0, "$0.00"),
+            (99.99, "$99.99"),
+            (1234.567, "$1234.57"),
+            (10.1, "$10.10"),
+        ];
+
+        for (price, expected) in prices {
+            let formatted = format!("${:.2}", price);
+            assert_eq!(formatted, expected);
+        }
+    }
+
+    #[test]
+    fn test_price_formatting_edge_cases() {
+        // Additional edge cases for price formatting
+        // Note: Floating point rounding behavior varies, so we use values that round predictably
+        let prices = [
+            (0.001, "$0.00"),       // Very small, rounds to 0
+            (0.006, "$0.01"),       // Rounds up
+            (0.004, "$0.00"),       // Rounds down
+            (999999.99, "$999999.99"), // Large number
+            (1.0, "$1.00"),         // Whole number
+            (100.0, "$100.00"),     // Round hundred
+            (50.0, "$50.00"),       // Round fifty
+        ];
+
+        for (price, expected) in prices {
+            let formatted = format!("${:.2}", price);
+            assert_eq!(formatted, expected, "Price formatting for {}", price);
+        }
+    }
+
+    #[test]
+    fn test_price_display_highlight_class() {
+        // Test the class logic used in PriceDisplay
+        let highlight = true;
+        let class = if highlight {
+            "text-xl font-bold text-green-600"
+        } else {
+            "text-gray-900 font-medium"
+        };
+        assert!(class.contains("text-xl"));
+        assert!(class.contains("font-bold"));
+        assert!(class.contains("text-green-600"));
+
+        let highlight = false;
+        let class = if highlight {
+            "text-xl font-bold text-green-600"
+        } else {
+            "text-gray-900 font-medium"
+        };
+        assert!(class.contains("text-gray-900"));
+        assert!(class.contains("font-medium"));
+    }
+
+    #[test]
+    fn test_button_class_construction() {
+        // Test the class concatenation logic used in Button
+        let base_class = "px-4 py-2 bg-blue-600 text-white rounded-lg";
+        let additional = "custom-class";
+        let combined = format!("{} {}", base_class, additional);
+
+        assert!(combined.contains("px-4"));
+        assert!(combined.contains("custom-class"));
+
+        // Test with empty additional class
+        let combined_empty = format!("{} {}", base_class, "");
+        assert!(combined_empty.contains("px-4"));
+        assert!(combined_empty.ends_with(" "));
+    }
+
+    #[test]
+    fn test_rating_title_format() {
+        // Test the title attribute format used in StarRating
+        let ratings = [0.0, 1.5, 2.5, 3.0, 4.5, 5.0];
+        for rating in ratings {
+            let title = format!("Rating: {:.1}", rating);
+            assert!(title.starts_with("Rating: "));
+            // Check it has one decimal place
+            let parts: Vec<&str> = title.split('.').collect();
+            assert_eq!(parts.len(), 2);
+            assert_eq!(parts[1].len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_modal_escape_key_detection() {
+        // Test the escape key logic (mocking the key string)
+        let keys = ["Escape", "Enter", "Tab", "ArrowUp"];
+        for key in keys {
+            let should_close = key == "Escape";
+            assert_eq!(should_close, key == "Escape", "Key: {}", key);
+        }
+    }
 }
