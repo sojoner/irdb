@@ -1,18 +1,20 @@
 # Version variables for easier maintenance and updates
-ARG POSTGRES_VERSION=17.5
+ARG POSTGRES_VERSION=18.1
 ARG POSTGRES_VARIANT=bookworm
-ARG PG_MAJOR_VERSION=17
+ARG PG_MAJOR_VERSION=18
 ARG CARGO_PGRX_VERSION=0.16.1
-ARG PARADEDB_VERSION=0.20.4
+ARG PARADEDB_VERSION=0.21.2
+ARG AGE_VERSION=1.7.0
 
 # Build stage - contains all build tools and dependencies
 FROM postgres:${POSTGRES_VERSION}-${POSTGRES_VARIANT} AS builder
 
 # Configure APT to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PG_MAJOR_VERSION=17
+ENV PG_MAJOR_VERSION=18
 ENV CARGO_PGRX_VERSION=0.16.1
-ENV PARADEDB_VERSION=0.20.4
+ENV PARADEDB_VERSION=0.21.2
+ENV AGE_VERSION=1.7.0
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -27,6 +29,7 @@ RUN apt-get update && apt-get install -y \
     bison \
     flex \
     libreadline-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain (cached layer)
@@ -50,12 +53,20 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     /root/.cargo/bin/cargo pgrx init --pg${PG_MAJOR_VERSION}=/usr/lib/postgresql/${PG_MAJOR_VERSION}/bin/pg_config && \
     /root/.cargo/bin/cargo pgrx install --release
 
+# Clone Apache AGE (separate layer for better caching)
+RUN git clone --branch v${AGE_VERSION} https://github.com/apache/age.git /tmp/age
+
+# Build Apache AGE extension using PostgreSQL module system
+RUN cd /tmp/age && \
+    make && \
+    make install
+
 # Runtime stage - minimal PostgreSQL image with only necessary components
 FROM postgres:${POSTGRES_VERSION}-${POSTGRES_VARIANT} AS runtime
 
 # Configure APT to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PG_MAJOR_VERSION=17
+ENV PG_MAJOR_VERSION=18
 
 # Install only runtime dependencies
 RUN apt-get update && apt-get install -y \
@@ -66,6 +77,10 @@ RUN apt-get update && apt-get install -y \
 # Copy built ParadeDB extension from builder stage
 COPY --from=builder /usr/lib/postgresql/${PG_MAJOR_VERSION}/lib/pg_search.so /usr/lib/postgresql/${PG_MAJOR_VERSION}/lib/
 COPY --from=builder /usr/share/postgresql/${PG_MAJOR_VERSION}/extension/pg_search* /usr/share/postgresql/${PG_MAJOR_VERSION}/extension/
+
+# Copy built Apache AGE extension from builder stage
+COPY --from=builder /usr/lib/postgresql/${PG_MAJOR_VERSION}/lib/age.so /usr/lib/postgresql/${PG_MAJOR_VERSION}/lib/
+COPY --from=builder /usr/share/postgresql/${PG_MAJOR_VERSION}/extension/age* /usr/share/postgresql/${PG_MAJOR_VERSION}/extension/
 
 # Copy PostgreSQL configuration
 COPY postgresql.conf /etc/postgresql/postgresql.conf
